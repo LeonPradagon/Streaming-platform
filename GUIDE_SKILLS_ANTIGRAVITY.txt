@@ -1,0 +1,52 @@
+# MASTER GUIDE: ANTIGRAVITY SKILLS (UI/UX PRO MAX & SUPERPOWERS)
+============================================================
+
+Panduan ini berisi cara menggunakan dua library skill besar yang telah diinstall secara
+Global (Knowledge Base) dan Lokal (Project Workspace).
+
+------------------------------------------------------------
+1. UI/UX PRO MAX (Design Intelligence)
+------------------------------------------------------------
+Skill ini berisi 67 Gaya UI, 161 Palet Warna, dan panduan desain premium.
+
+Cara Menggunakan:
+- Tanya ke saya: "Buatkan desain landing page menggunakan UI/UX Pro Max"
+- Saya akan otomatis mengambil data dari Global Knowledge Base:
+  C:\Users\Jhansen Wilson\.gemini\antigravity\knowledge\ui-ux-pro-max/
+
+Aksi Manual (Opsional):
+- Jalankan script pencarian desain (di terminal):
+  python "C:\Users\Jhansen Wilson\.gemini\antigravity\knowledge\ui-ux-pro-max\artifacts\scripts\search.py" "saas analytics dashboard" --design-system
+
+------------------------------------------------------------
+2. SUPERPOWERS (Workflow Framework)
+------------------------------------------------------------
+Skill ini berisi 14 alur kerja sistematis (TDD, Debugging, Brainstorming, dll).
+
+Panggil Skill Ini Saat:
+- "Gunakan skill BRAINSTORMING untuk fitur baru ini" -> Untuk mematangkan ide sebelum ngoding.
+- "Lakukan TEST-DRIVEN-DEVELOPMENT" -> Untuk memastikan kode 100% bebas bug dengan testing.
+- "Gunakan SYSTEMATIC-DEBUGGING" -> Jika ada bug yang sulit ditemukan.
+
+Daftar Skill Lokal:
+Lihat folder `.agent/skills/` di project Anda untuk membaca panduan detail tiap skill.
+
+------------------------------------------------------------
+PERTANYAAN: APAKAH HARUS INSTALL LAGI DI PROJECT BARU?
+------------------------------------------------------------
+JAWABAN: TIDAK PERLU INSTALL LAGI (UNTUK AKSES GLOBAL).
+
+1. PANGGIL SAJA (GLOBAL):
+   Karena sudah masuk ke "Global Knowledge Base", saya (Antigravity) sudah punya
+   "ingatan" tentang skill ini di project manapun. Anda tinggal bilang:
+   "Aktifkan skill Superpowers" atau "Gunakan UI/UX Pro Max".
+
+2. INSTALL LOKAL (OPSIONAL):
+   Folder `.agent/skills/` hanya ada di project saat ini. Jika Anda ingin folder
+   pendukung skill tersebut muncul secara visual di project baru, cukup minta saya:
+   "Initialize skills UI/UX dan Superpowers ke project ini."
+   Saya akan meng-copy filenya dari Global ke Lokal dalam hitungan detik.
+
+============================================================
+TIPS: Jika Anda lupa perintahnya, tanya saja: "Daftar skill apa saja yang saya punya?"
+============================================================
