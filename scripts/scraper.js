@@ -1,10 +1,5 @@
 /**
- * Scraper Core Logic
- * 
- * Script ini bertugas untuk:
- * 1. Mengambil drama/anime populer dari TMDB.
- * 2. Memasukkannya ke database Supabase dengan status 'pending'.
- * 3. Mengintegrasikan link embed awal.
+ * Universal Scraper logic
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -17,8 +12,25 @@ const tmdbApiKey = process.env.TMDB_API_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-async function scrapeMovies(type = 'tv', genreId = 18) { // Default 18 = Drama
-  console.log(`Starting scrape for ${type} with genre ${genreId}...`);
+// Definisi Genre Utama
+const MOVIE_GENRES = [
+  { id: 28, name: 'Action' },
+  { id: 12, name: 'Adventure' },
+  { id: 35, name: 'Comedy' },
+  { id: 27, name: 'Horror' },
+  { id: 10749, name: 'Romance' },
+  { id: 878, name: 'Sci-Fi' }
+];
+
+const TV_GENRES = [
+  { id: 10759, name: 'Action & Adventure' },
+  { id: 16, name: 'Animation' }, // For Anime
+  { id: 18, name: 'Drama' }, // For Drakor
+  { id: 10765, name: 'Sci-Fi & Fantasy' }
+];
+
+async function scrapeMetadata(type = 'tv', genreId = 18, pagesToScrape = 3) {
+  console.log(`\n🔍 Starting scrape for ${type} | Genre ID: ${genreId}...`);
   
   if (!tmdbApiKey) {
     console.error('TMDB_API_KEY missing');
@@ -26,21 +38,32 @@ async function scrapeMovies(type = 'tv', genreId = 18) { // Default 18 = Drama
   }
 
   try {
-    // 1. Fetch from TMDB (Discover)
-    const url = `https://api.themoviedb.org/3/discover/${type}?api_key=${tmdbApiKey}&with_genres=${genreId}&sort_by=popularity.desc`;
-    const response = await fetch(url);
-    const data = await response.json();
+    for (let page = 1; page <= pagesToScrape; page++) {
+      console.log(`   📄 Fetching Page ${page}...`);
+      const url = `https://api.themoviedb.org/3/discover/${type}?api_key=${tmdbApiKey}&with_genres=${genreId}&sort_by=popularity.desc&page=${page}`;
+      const response = await fetch(url);
+      const data = await response.json();
 
-    const contents = data.results.slice(0, 10); // Ambil 10 teratas dulu untuk testing
+      if (!data.results || data.results.length === 0) {
+        console.error(`No results for ${type} genre ${genreId} on page ${page}`);
+        break; // Stop if no more results
+      }
 
-    for (const item of contents) {
-      const tmdbId = item.id;
-      const title = item.name || item.title;
-      const category = genreId === 16 ? 'anime' : 'drakor';
+      const contents = data.results; // Do all results instead of slice(0, 10)
 
-      console.log(`Processing: ${title} (TMDB: ${tmdbId})`);
+      for (const item of contents) {
+        const tmdbId = item.id;
+        const title = item.name || item.title;
+        
+        // Categorization Logic
+        let category = 'movie'; 
+        if (type === 'tv') {
+          category = genreId === 16 ? 'anime' : 'drakor';
+        }
 
-      // 2. Insert to Supabase 'contents'
+        console.log(`   - Processing: ${title} (${category.toUpperCase()})`);
+
+      // 1. Insert/Upsert Content
       const { data: dbContent, error: dbError } = await supabase
         .from('contents')
         .upsert({ 
@@ -53,41 +76,91 @@ async function scrapeMovies(type = 'tv', genreId = 18) { // Default 18 = Drama
         .single();
 
       if (dbError) {
-        console.error(`Error inserting ${title}:`, dbError.message);
-        continue;
-      }
-
-      // 3. Simulasi pencarian Link Embed (Contoh link placeholder)
-      // Nantinya bagian ini bisa dihubungkan ke crawler aggregator film
-      const embedUrl = `https://vidsrc.to/embed/${type}/${tmdbId}`; // Contoh provider vidsrc
-      
-      const { error: linkError } = await supabase
-        .from('embed_links')
-        .upsert({
-          content_id: dbContent.id,
-          provider: 'Vidsrc (Auto)',
-          url: embedUrl,
-          quality: 'HD'
-        });
-
-      if (linkError) {
-        console.error(`Error inserting link for ${title}:`, linkError.message);
+        // Fallback for 'movie' type if constraint not updated by user
+        if (dbError.message.includes('check constraint') && category === 'movie') {
+           console.warn(`      ⚠️  Constraint check failed for 'movie'. Falling back to 'drakor'...`);
+           const { data: fallback, error: fbError } = await supabase
+            .from('contents')
+            .upsert({ tmdb_id: tmdbId, title: title, type: 'drakor', status: 'pending' }, { onConflict: 'tmdb_id' })
+            .select().single();
+           if (fbError) { console.error(`      ❌ Fallback failed:`, fbError.message); continue; }
+           // Use fallback content for links
+           addProviderLinks(fallback, type, tmdbId);
+        } else {
+           console.error(`      ❌ Error inserting ${title}:`, dbError.message);
+           continue;
+        }
       } else {
-        console.log(`✅ Success: ${title} added to queue.`);
+         addProviderLinks(dbContent, type, tmdbId);
       }
     }
-
-    console.log('Scraping session finished.');
-
+   }
   } catch (err) {
     console.error('Scraper failed:', err);
   }
 }
 
-// Jalankan: 18 = Drama (untuk Drakor), 16 = Animation (untuk Anime)
+async function addProviderLinks(dbContent, type, tmdbId) {
+  const isTV = type === 'tv' || type === 'anime';
+  const providers = [
+    { name: 'Speed 1 (JW Player)', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}?player=jw` },
+    { name: 'Speed 2 (Stable)', url: `https://vidsrc.pm/embed/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` }
+  ];
+
+  for (const p of providers) {
+    const { error: linkError } = await supabase
+      .from('embed_links')
+      .upsert({
+        content_id: dbContent.id,
+        provider: p.name,
+        url: p.url,
+        quality: 'HD'
+      }, { onConflict: 'content_id,provider' });
+
+    if (linkError) {
+      console.error(`      ❌ Error link for ${p.name}:`, linkError.message);
+    }
+  }
+}
+
+async function syncExistingContent() {
+  console.log('\n🔄 Syncing links for EXISTING content in database...');
+  const { data: contents, error } = await supabase
+    .from('contents')
+    .select('*');
+
+  if (error) {
+    console.error('Error fetching contents:', error.message);
+    return;
+  }
+
+  console.log(`   - Found ${contents.length} items to sync.`);
+
+  for (const item of contents) {
+    console.log(`   - Syncing: ${item.title} (${item.type})`);
+    // Pass correct 'type' based on category
+    const tmdbType = (item.type === 'movie') ? 'movie' : 'tv';
+    await addProviderLinks(item, tmdbType, item.tmdb_id);
+  }
+}
+
 async function run() {
-  await scrapeMovies('tv', 18); // Drakor
-  await scrapeMovies('tv', 16); // Anime (TMDB treats Anime as Animation genre)
+  console.log('🚀 Starting FULL Scraper session...');
+  
+  // 1. Sync existing first to ensure everything has links
+  await syncExistingContent();
+
+  // 2. Discover new TV Categories
+  for (const g of TV_GENRES) {
+    await scrapeMetadata('tv', g.id);
+  }
+
+  // 3. Discover new Movie Categories
+  for (const g of MOVIE_GENRES) {
+    await scrapeMetadata('movie', g.id);
+  }
+
+  console.log('\n✅ ALL Scraping session finished.');
 }
 
 run();

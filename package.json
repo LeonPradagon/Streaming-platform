@@ -9,13 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.2",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.8.0",
     "next": "16.2.4",
     "node-fetch": "^3.3.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sweetalert2": "^11.26.24",
+    "sweetalert2-react-content": "^5.1.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

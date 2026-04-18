@@ -1,72 +1,232 @@
 import { supabase } from '@/lib/supabase';
-import { fetchTMDBMetadata, getTMDBImageUrl } from '@/lib/tmdb';
-import Link from 'next/link';
+import { fetchTMDBMetadata, classifyPlatform, PLATFORM_LABELS, PLATFORM_COLORS, Platform } from '@/lib/tmdb';
+import HeroCarousel from '@/components/HeroCarousel';
+import ContentRow from '@/components/ContentRow';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  // Fetch approved content
-  const { data: movies, error } = await supabase
+  // 1. Fetch approved content with basic info
+  const { data: allContent, error: dbError } = await supabase
     .from('contents')
     .select('*')
     .eq('status', 'approved')
     .order('created_at', { ascending: false });
 
+  if (dbError || !allContent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center pt-20">
+        <div className="glass p-8 rounded-2xl text-center max-w-md">
+          <h2 className="text-xl font-bold mb-2">Gagal Memuat Konten</h2>
+          <p className="text-gray-400">Silakan periksa koneksi database Anda.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Map stored metadata (no more bulk TMDB API calls!)
+  const validContent = allContent.map((item) => {
+    // We treat the database row as the source of truth for metadata
+    // This dramatically speeds up page loads and prevents 429 errors
+    return { 
+      ...item, 
+      metadata: {
+        id: item.tmdb_id,
+        title: item.title,
+        overview: item.overview || '',
+        poster_path: item.poster_path,
+        backdrop_path: item.backdrop_path,
+        vote_average: item.vote_average || 0,
+        release_date: item.release_date,
+        genres: (item.genre_names || []).map((name: string) => ({ id: 0, name })),
+        credits: { cast: item.cast_data || [] }
+      },
+      platform: item.platform || 'other' as Platform 
+    };
+  });
+
+  // 3. Group by Specialized Type (Drakor, Drachin, etc.)
+  const typeGroups: Record<string, typeof validContent> = {
+    'drakor': [],
+    'drachin': [],
+    'anime': [],
+    'donghua': [],
+    'variety': [],
+    'drathai': [],
+    'drajep': [],
+  };
+
+  validContent.forEach(item => {
+    if (typeGroups[item.type]) {
+      typeGroups[item.type].push(item);
+    }
+  });
+
+  // 4. Group by Genre
+  const genreGroups: Record<string, typeof validContent> = {
+    'Drama': [],
+    'Action & Adventure': [],
+    'Animation': [],
+    'Comedy': [],
+    'Horror': [],
+    'Sci-Fi & Fantasy': [],
+  };
+
+  validContent.forEach(item => {
+    const genres = item.genre_names || item.metadata?.genres?.map((g: any) => g.name) || [];
+    
+    if (genres.includes('Action') || genres.includes('Action & Adventure') || genres.includes('Adventure')) {
+      genreGroups['Action & Adventure'].push(item);
+    }
+    if (genres.includes('Drama')) genreGroups['Drama'].push(item);
+    if (genres.includes('Animation')) genreGroups['Animation'].push(item);
+    if (genres.includes('Comedy')) genreGroups['Comedy'].push(item);
+    if (genres.includes('Horror')) genreGroups['Horror'].push(item);
+    if (genres.includes('Science Fiction') || genres.includes('Fantasy') || genres.includes('Sci-Fi & Fantasy')) {
+      genreGroups['Sci-Fi & Fantasy'].push(item);
+    }
+  });
+
+  // 5. Group by Platform
+  const platformGroups: Record<Platform, typeof validContent> = {
+    netflix: [],
+    disney: [],
+    amazon: [],
+    apple: [],
+    hbo: [],
+    paramount: [],
+    anime: [],
+    other: [],
+  };
+
+  validContent.forEach(item => {
+    platformGroups[item.platform as Platform].push(item);
+  });
+
+  // Layout logic
+  const trending = [...validContent].sort((a, b) => (b.metadata?.vote_average || 0) - (a.metadata?.vote_average || 0));
+  const heroItems = trending.slice(0, 5);
+
+  const TYPE_LABELS: Record<string, string> = {
+    drakor: '🇰🇷 Drama Korea (Drakor)',
+    drachin: '🇨🇳 Drama China',
+    anime: '🎌 Anime Terpopuler',
+    donghua: '🐲 Donghua (Animasi China)',
+    variety: '📺 Variety & Reality Shows',
+    drathai: '🇹🇭 Drama Thailand',
+    drajep: '🇯🇵 Drama Jepang (J-Drama)',
+  };
+
   return (
-    <main style={{ minHeight: '100vh', paddingBottom: '4rem' }}>
-      {/* Hero Section */}
-      <section style={{ height: '70vh', position: 'relative', display: 'flex', alignItems: 'center', padding: '0 5%' }}>
-        <div style={{ zIndex: 2, maxWidth: '600px' }}>
-          <h1 style={{ fontSize: '4rem', fontWeight: 800, lineHeight: 1.1, marginBottom: '1.5rem' }}>
-            Cinematic <span style={{ color: '#38bdf8' }}>Streaming</span> Experience
-          </h1>
-          <p style={{ fontSize: '1.2rem', color: '#94a3b8', marginBottom: '2rem' }}>
-            Nonton Anime dan Drakor terbaru dengan kualitas HD secara gratis. 
-            Tanpa ribet, langsung klik dan tonton.
-          </p>
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <Link href="#trending" className="btn-primary">Mulai Menonton</Link>
-            <Link href="/admin" style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: '1px solid #1e293b', fontWeight: 'bold' }}>Dashboard Admin</Link>
-          </div>
+    <div className="pb-10 relative">
+      
+      {heroItems.length > 0 ? (
+        <HeroCarousel items={heroItems} />
+      ) : (
+        <div className="h-[80vh] flex items-center justify-center">
+          <div className="skeleton w-3/4 h-1/2 rounded-xl"></div>
         </div>
-        <div style={{ position: 'absolute', top: 0, right: 0, width: '60%', height: '100%', background: 'linear-gradient(to left, var(--background), transparent)', zIndex: 1 }}></div>
-      </section>
+      )}
 
-      {/* Movie Grid */}
-      <section id="trending" style={{ padding: '2rem 5%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>Terbaru di <span style={{ color: '#f43f5e' }}>Antigravity</span></h2>
-          <div style={{ display: 'flex', gap: '1rem', color: '#64748b', fontSize: '0.9rem' }}>
-            <span>Anime</span>
-            <span>Drakor</span>
-          </div>
-        </div>
+      {/* Main Content Sections */}
+      <div className="relative z-30 mt-[-5vw] flex flex-col gap-8 md:gap-12 pb-20">
+        
+        {/* Trending */}
+        {trending.length > 0 && (
+          <ContentRow title="🔥 Trending Minggu Ini" items={trending} isNewRow={false} />
+        )}
 
-        {!movies || movies.length === 0 ? (
-          <div className="glass" style={{ padding: '4rem', textAlign: 'center', borderRadius: '1rem' }}>
-            <p style={{ color: '#64748b' }}>Belum ada konten yang tersedia. Jalankan scraper untuk mengisi data!</p>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '2rem' }}>
-            {movies.map(async (movie) => {
-               const metadata = await fetchTMDBMetadata(movie.tmdb_id, movie.type === 'anime' ? 'tv' : 'tv');
-               return (
-                 <Link href={`/watch/${movie.id}`} key={movie.id} className="movie-card">
-                   <img 
-                     src={getTMDBImageUrl(metadata?.poster_path || '', 'w500')} 
-                     alt={movie.title}
-                     style={{ width: '100%', height: 'auto', display: 'block' }}
-                   />
-                   <div className="overlay">
-                     <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>{movie.title}</h3>
-                     <p style={{ fontSize: '0.8rem', color: '#38bdf8' }}>{metadata?.vote_average.toFixed(1)} ★</p>
-                   </div>
-                 </Link>
-               )
-            })}
+        {/* Specialized Types (Primary Rows) */}
+        {typeGroups.drakor.length > 0 && (
+          <ContentRow title={TYPE_LABELS.drakor} items={typeGroups.drakor} />
+        )}
+
+        {/* Action Genre */}
+        {genreGroups['Action & Adventure'].length > 0 && (
+          <ContentRow title="💥 Action & Adventure" items={genreGroups['Action & Adventure']} />
+        )}
+
+        {/* Netflix Platform */}
+        {platformGroups.netflix.length > 0 && (
+          <ContentRow 
+             title={PLATFORM_LABELS.netflix} 
+             items={platformGroups.netflix} 
+             platformColor={PLATFORM_COLORS.netflix}
+          />
+        )}
+
+        {/* Drachin */}
+        {typeGroups.drachin.length > 0 && (
+          <ContentRow title={TYPE_LABELS.drachin} items={typeGroups.drachin} />
+        )}
+
+        {/* Drama Genre */}
+        {genreGroups['Drama'].length > 0 && (
+          <ContentRow title="🎭 Drama Room" items={genreGroups['Drama']} />
+        )}
+
+        {/* Anime / Animation */}
+        {(typeGroups.anime.length > 0 || typeGroups.donghua.length > 0) && (
+          <ContentRow 
+            title={typeGroups.anime.length > 0 ? TYPE_LABELS.anime : TYPE_LABELS.donghua} 
+            items={[...typeGroups.anime, ...typeGroups.donghua]} 
+            platformColor={PLATFORM_COLORS.anime} 
+          />
+        )}
+
+        {/* Disney Platform */}
+        {platformGroups.disney.length > 0 && (
+          <ContentRow 
+             title={PLATFORM_LABELS.disney} 
+             items={platformGroups.disney} 
+             platformColor={PLATFORM_COLORS.disney}
+          />
+        )}
+
+        {/* Variety Shows */}
+        {typeGroups.variety.length > 0 && (
+          <ContentRow title={TYPE_LABELS.variety} items={typeGroups.variety} />
+        )}
+
+        {/* Remaining Countries */}
+        {typeGroups.drathai.length > 0 && (
+          <ContentRow title={TYPE_LABELS.drathai} items={typeGroups.drathai} />
+        )}
+
+        {/* Other Platform Sections */}
+        {['amazon', 'hbo', 'apple', 'paramount'].map((p) => {
+           const platform = p as Platform;
+           if (platformGroups[platform].length === 0) return null;
+           return (
+             <ContentRow 
+               key={platform} 
+               title={PLATFORM_LABELS[platform]} 
+               items={platformGroups[platform]} 
+               platformColor={PLATFORM_COLORS[platform]}
+             />
+           );
+        })}
+
+        {/* Horror Genre */}
+        {genreGroups['Horror'].length > 0 && (
+          <ContentRow title="👻 Horror & Thriller" items={genreGroups['Horror']} />
+        )}
+
+        {/* Sci-Fi */}
+        {genreGroups['Sci-Fi & Fantasy'].length > 0 && (
+          <ContentRow title="🚀 Dunia Sci-Fi & Fantasi" items={genreGroups['Sci-Fi & Fantasy']} />
+        )}
+
+        {/* Empty State */}
+        {validContent.length === 0 && (
+          <div className="px-5 mt-20">
+             <div className="glass p-12 text-center rounded-2xl mx-auto max-w-2xl border-white/5">
+              <h2 className="text-2xl md:text-3xl font-bold mb-4 text-white">Situs Masih Kosong</h2>
+              <p className="text-gray-400 text-lg">Gunakan panel admin atau scraper untuk mengisi konten premium pertama Anda.</p>
+            </div>
           </div>
         )}
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }
