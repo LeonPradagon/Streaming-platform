@@ -14,8 +14,8 @@ async function main() {
 
   try {
     if (task === 'scrape' || task === 'all') {
-      console.log('--- Phase 1: Discovery Scrape ---');
-      const res = await service.runDiscovery(2);
+      console.log('--- Phase 1: Full Routine Scrape (Trending + 5 Pages/Genre) ---');
+      const res = await service.runFullRoutine();
       console.log('Result:', res);
     }
 

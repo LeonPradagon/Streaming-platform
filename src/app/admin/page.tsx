@@ -15,6 +15,7 @@ export default async function AdminOverview() {
   const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
   const { count: contentCount } = await supabase.from('contents').select('*', { count: 'exact', head: true });
   const { count: pendingCount } = await supabase.from('contents').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+  const { count: trafficCount } = await supabase.from('watch_history').select('*', { count: 'exact', head: true }).gte('updated_at', new Date(new Date().setHours(0,0,0,0)).toISOString());
   
   // Recent Logs
   const { data: recentLogs } = await supabase
@@ -32,7 +33,7 @@ export default async function AdminOverview() {
           icon={<Film size={24} color="#eab308" />} 
           label="Total Konten" 
           value={contentCount || 0} 
-          trend="+12% bulan ini"
+          trend="Total film & series"
         />
         <StatCard 
           icon={<Users size={24} color="#38bdf8" />} 
@@ -49,9 +50,9 @@ export default async function AdminOverview() {
         />
         <StatCard 
           icon={<BarChart3 size={24} color="#8b5cf6" />} 
-          label="Traffic Harian" 
-          value="2.4k" 
-          trend="+5% dari kemarin"
+          label="Aktivitas Nonton Hari Ini" 
+          value={trafficCount || 0} 
+          trend="Pemutaran video harian"
         />
       </div>
 
@@ -110,7 +111,7 @@ export default async function AdminOverview() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#475569' }} />
-                <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Jhansen Wilson</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Administrator</div>
                 <div style={{ marginLeft: 'auto', color: '#10b981', fontSize: '0.8rem' }}>45 actions</div>
               </div>
             </div>

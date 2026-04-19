@@ -3,6 +3,7 @@ import { fetchTMDBMetadata } from '@/lib/tmdb';
 import MovieCard from '@/components/MovieCard';
 import BrowseFilters from '@/components/BrowseFilters';
 import { Search } from 'lucide-react';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,9 +16,11 @@ export default async function BrowsePage({
   const q = typeof unresolvedParams?.q === 'string' ? unresolvedParams.q : '';
   const type = typeof unresolvedParams?.type === 'string' ? unresolvedParams.type : 'all';
   const sort = typeof unresolvedParams?.sort === 'string' ? unresolvedParams.sort : 'terbaru';
+  const page = typeof unresolvedParams?.page === 'string' ? parseInt(unresolvedParams.page) : 1;
+  const PAGE_SIZE = 30;
 
   // Fetch from Supabase DB
-  let query = supabase.from('contents').select('*').eq('status', 'approved');
+  let query = supabase.from('contents').select('*', { count: 'exact' }).eq('status', 'approved');
   
   if (type !== 'all') {
     if (type === 'tv') {
@@ -34,32 +37,34 @@ export default async function BrowsePage({
     query = query.ilike('title', `%${q}%`);
   }
   
-  const { data: dbContents, error } = await query.order('created_at', { ascending: false });
+  // Sort at DB level!
+  if (sort === 'rating') {
+    query = query.order('vote_average', { ascending: false, nullsFirst: false });
+  } else if (sort === 'az') {
+    query = query.order('title', { ascending: true });
+  } else {
+    query = query.order('created_at', { ascending: false });
+  }
+
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  query = query.range(from, to);
+  
+  const { data: dbContents, count, error } = await query;
   
   let validResults: any[] = [];
   
   if (!error && dbContents) {
-    // Fetch TMDB Metadata in parallel
-    const contentWithMetadata = await Promise.all(
-      dbContents.map(async (item) => {
-        try {
-          const metadata = await fetchTMDBMetadata(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
-          return { ...item, metadata };
-        } catch (e) {
-          return { ...item, metadata: null };
-        }
-      })
-    );
-    
-    validResults = contentWithMetadata.filter(c => c.metadata);
-
-    // Apply sorting
-    if (sort === 'rating') {
-      validResults.sort((a, b) => (b.metadata?.vote_average || 0) - (a.metadata?.vote_average || 0));
-    } else if (sort === 'az') {
-      validResults.sort((a, b) => a.title.localeCompare(b.title));
-    }
-    // 'terbaru' is default from DB order
+    validResults = dbContents.map((item) => ({
+      ...item,
+      metadata: {
+        poster_path: item.poster_path,
+        vote_average: typeof item.vote_average === 'number' ? item.vote_average : parseFloat(item.vote_average || '0'),
+        release_date: item.release_date,
+        first_air_date: item.release_date, // For TV backwards compatibility
+      }
+    }));
   }
 
   return (
@@ -80,11 +85,32 @@ export default async function BrowsePage({
 
       {/* Grid Results */}
       {validResults.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 mt-8">
-          {validResults.map((item) => (
-            <MovieCard key={item.id} item={item} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 mt-8">
+            {validResults.map((item) => (
+              <MovieCard key={item.id} item={item} />
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {Math.ceil((count || 0) / PAGE_SIZE) > 1 && (
+            <div className="flex justify-center items-center gap-4 mt-12">
+               <Link 
+                 href={`/browse?${new URLSearchParams({ ...(unresolvedParams as any), page: Math.max(1, page - 1).toString() }).toString()}`}
+                 className={`px-4 py-2 rounded-lg font-bold transition ${page <= 1 ? 'bg-white/5 text-gray-500 pointer-events-none' : 'bg-white/10 text-white hover:bg-white/20'}`}
+               >
+                 Sebelumnya
+               </Link>
+               <span className="text-gray-400 font-semibold">Halaman {page} dari {Math.ceil((count || 0) / PAGE_SIZE)}</span>
+               <Link 
+                 href={`/browse?${new URLSearchParams({ ...(unresolvedParams as any), page: (page + 1).toString() }).toString()}`}
+                 className={`px-4 py-2 rounded-lg font-bold transition ${page >= Math.ceil((count || 0) / PAGE_SIZE) ? 'bg-white/5 text-gray-500 pointer-events-none' : 'bg-primary text-white hover:bg-red-700'}`}
+               >
+                 Selanjutnya
+               </Link>
+            </div>
+          )}
+        </>
       ) : (
         <div className="flex flex-col items-center justify-center p-20 text-center glass rounded-2xl mt-8">
            <Search size={48} className="text-gray-500 mb-4" />

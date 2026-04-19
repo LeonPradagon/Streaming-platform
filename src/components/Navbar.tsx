@@ -1,302 +1,223 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
-import { Play, Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { Search, User, Settings, LogOut, Menu, X, Play } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import SearchModal from "./SearchModal";
 
 export default function Navbar({ brandName }: { brandName: string }) {
   const [isScrolled, setIsScrolled] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-  
-  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const pathname = usePathname();
-  const router = useRouter();
 
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50);
+      setIsScrolled(window.scrollY > 10);
     };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  useEffect(() => {
-    if (isSearchOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isSearchOpen]);
-
-  // Close mobile menu on route change
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [pathname]);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/browse?q=${encodeURIComponent(searchQuery.trim())}`);
-      setIsSearchOpen(false);
-      setSearchQuery('');
-    }
-  };
-
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      setIsSearchOpen(false);
-      setSearchQuery('');
-    }
-  };
-
   const navLinks = [
-    { name: 'Home', path: '/' },
-    { name: 'Movies', path: '/browse?type=movie' },
-    { name: 'Series', path: '/browse?type=tv' },
-    { name: 'My List', path: '/profile?tab=list' },
-    { name: 'Browse', path: '/browse' },
-  ];
-
-  // Mock notifications
-  const notifications = [
-    { id: 1, text: 'Film baru ditambahkan: One Piece', time: '2 jam lalu' },
-    { id: 2, text: 'Episode baru tersedia untuk Naruto', time: '5 jam lalu' },
-    { id: 3, text: 'Rekomendasi untuk Anda: Attack on Titan', time: '1 hari lalu' },
+    { name: "Home", path: "/" },
+    { name: "Movies", path: "/browse?type=movie" },
+    { name: "TV Shows", path: "/browse?type=tv" },
+    { name: "Trending", path: "/trending" },
+    { name: "My List", path: "/profile?tab=watchlist" },
   ];
 
   return (
     <>
-      <nav 
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled ? 'glass-nav py-4' : 'bg-gradient-to-b from-black/80 to-transparent py-6'
-        } px-4 md:px-8 lg:px-12 flex items-center justify-between`}
-      >
-        <div className="flex items-center gap-8">
+      <div className="fixed top-4 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+        <nav
+          className={`pointer-events-auto transition-all duration-500 w-full max-w-[1200px] flex items-center justify-between px-4 md:px-6 py-2.5 rounded-full ${
+            isScrolled
+              ? "bg-[#141414]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.5)] border border-white/10"
+              : "bg-black/60 backdrop-blur-md shadow-lg border border-white/5"
+          }`}
+        >
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="bg-primary p-1.5 rounded-full text-black group-hover:scale-110 transition-transform">
-              <Play size={20} fill="currentColor" />
+          <Link href="/" className="flex items-center gap-2 group mr-4 md:mr-8">
+            <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center group-hover:scale-105 transition-transform shadow-lg shadow-red-500/30">
+              <Play className="text-white ml-1" size={16} fill="currentColor" />
             </div>
-            <span className="text-xl md:text-2xl font-black tracking-tight uppercase">
-              {brandName.split(' ')[0]}
-              <span className="text-primary">{brandName.split(' ')[1] || ''}</span>
+            <span className="text-xl md:text-2xl font-bold tracking-tight text-white group-hover:text-red-500 transition-colors">
+              {brandName || "Netix"}
             </span>
           </Link>
 
-          {/* Desktop Menu */}
-          <div className="hidden md:flex items-center gap-6">
-            {navLinks.map((link) => (
-              <Link 
-                key={link.name} 
-                href={link.path}
-                className={`text-sm font-semibold transition-colors hover:text-white ${
-                  pathname === link.path || (pathname === '/' && link.path === '/') 
-                    ? 'text-white' 
-                    : 'text-text-muted'
-                }`}
-              >
-                {link.name}
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        {/* Right Section */}
-        <div className="flex items-center gap-4 sm:gap-6">
-          {/* Search */}
-          <div className="relative flex items-center">
-            <form 
-              onSubmit={handleSearch}
-              className={`flex items-center overflow-hidden transition-all duration-300 ease-in-out border border-white/20 bg-black/40 rounded-full ${
-                isSearchOpen ? 'w-48 sm:w-64 px-4 opacity-100 mr-2' : 'w-0 opacity-0 border-transparent mr-0'
-              }`}
-            >
-              <Search size={16} className="text-gray-400 min-w-[16px]" />
-              <input 
-                ref={searchInputRef}
-                type="text" 
-                placeholder="Judul, genre..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="bg-transparent border-none outline-none text-sm text-white px-3 py-2 w-full placeholder:text-gray-500"
-                onBlur={() => {
-                  setTimeout(() => setIsSearchOpen(false), 300);
-                }}
-              />
-            </form>
-            <button 
-              onClick={() => setIsSearchOpen(!isSearchOpen)}
-              className={`text-white transition-opacity ${isSearchOpen ? 'hidden' : 'block'}`}
-            >
-              <Search size={20} />
-            </button>
-          </div>
-
-          {/* Notifications */}
-          <div className="relative">
-            <button 
-              className="text-white relative"
-              onClick={() => { setIsNotifOpen(!isNotifOpen); setIsProfileOpen(false); }}
-              onBlur={() => setTimeout(() => setIsNotifOpen(false), 200)}
-            >
-              <Bell size={20} />
-              <span className="absolute -top-1 -right-1 bg-primary text-[10px] font-bold text-white w-4 h-4 rounded-full flex items-center justify-center">
-                {notifications.length}
-              </span>
-            </button>
-
-            {/* Notification Dropdown */}
-            <div className={`absolute right-0 mt-3 w-72 bg-card border border-white/10 rounded-xl shadow-2xl py-2 transition-all origin-top-right z-50 ${
-              isNotifOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
-            }`}>
-              <div className="px-4 py-2 border-b border-white/5 mb-1">
-                <p className="text-sm font-bold text-white">Notifikasi</p>
-              </div>
-              {notifications.map(notif => (
-                <div key={notif.id} className="px-4 py-3 hover:bg-white/5 cursor-pointer transition">
-                  <p className="text-sm text-gray-200 leading-snug">{notif.text}</p>
-                  <p className="text-xs text-gray-500 mt-1">{notif.time}</p>
-                </div>
-              ))}
-              <div className="px-4 pt-2 pb-1 border-t border-white/5 mt-1">
-                <button className="text-xs text-primary font-bold hover:underline w-full text-center py-1">
-                  Tandai semua sudah dibaca
-                </button>
-              </div>
+          {/* Desktop Navigation Grouping */}
+          <div className="hidden lg:flex items-center justify-between flex-1">
+            <div className="flex items-center gap-1">
+              {navLinks.map((link) => {
+                const isActive =
+                  pathname === link.path ||
+                  (pathname === "/" && link.path === "/");
+                return (
+                  <Link
+                    key={link.name}
+                    href={link.path}
+                    className={`text-[15px] font-medium transition-all px-4 py-2 rounded-full ${
+                      isActive
+                        ? "bg-white text-black shadow-sm font-semibold"
+                        : "text-gray-300 hover:text-white hover:bg-white/10"
+                    }`}
+                  >
+                    {link.name}
+                  </Link>
+                );
+              })}
             </div>
-          </div>
 
-          {/* User Profile */}
-          <div className="relative hidden sm:block">
-            <button 
-              className="flex items-center gap-2"
-              onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotifOpen(false); }}
-              onBlur={() => setTimeout(() => setIsProfileOpen(false), 200)}
-            >
-              <div className="w-8 h-8 rounded-md bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center overflow-hidden">
-                <User size={18} className="text-white" />
-              </div>
-              <ChevronDown size={14} className={`text-white transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Profile Dropdown */}
-            <div className={`absolute right-0 mt-3 w-48 bg-card border border-white/10 rounded-xl shadow-2xl py-2 transition-all origin-top-right z-50 ${
-              isProfileOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
-            }`}>
-              <div className="px-4 py-2 border-b border-white/5 mb-2">
-                <p className="text-sm font-bold text-white">User Account</p>
-              </div>
-              <Link href="/profile" className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-white/5">
-                <User size={16} /> Profil
-              </Link>
-              <Link href="/profile?tab=list" className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-white/5">
-                <Play size={16} /> Daftar Saya
-              </Link>
-              <Link href="/profile?tab=settings" className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-white/5">
-                <Settings size={16} /> Pengaturan
-              </Link>
-              <div className="h-px bg-white/5 my-2"></div>
-              <button 
-                onClick={() => {
-                  // Clear session data
-                  localStorage.removeItem('streaming_watchlist');
-                  localStorage.removeItem('streaming_likes');
-                  localStorage.removeItem('streaming_history');
-                  window.location.href = '/';
-                }}
-                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-500 hover:bg-white/5"
+            <div className="flex items-center gap-3">
+              {/* Search Icon */}
+              <button
+                onClick={() => setIsSearchModalOpen(true)}
+                className="w-[38px] h-[38px] rounded-full bg-zinc-800/80 flex items-center justify-center text-gray-300 hover:text-white hover:bg-zinc-700 transition-colors shadow-sm border border-white/10"
               >
-                <LogOut size={16} /> Keluar
+                <Search size={18} strokeWidth={2.5} />
               </button>
+
+              {/* Profile Button */}
+              <div className="relative group">
+                <button
+                  className="flex items-center gap-2 outline-none bg-red-600 text-white px-5 py-2.5 rounded-full hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 transform hover:scale-[1.02]"
+                  onMouseEnter={() => setIsProfileOpen(true)}
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                >
+                  <User size={16} />
+                  <span className="text-sm font-semibold tracking-wide">Profile</span>
+                </button>
+
+                {isProfileOpen && (
+                  <div
+                    onMouseLeave={() => setIsProfileOpen(false)}
+                    className="absolute right-0 mt-3 w-48 origin-top-right z-50 pt-1"
+                  >
+                    <div className="bg-[#141414]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl py-2 flex flex-col gap-1 overflow-hidden font-medium">
+                      <Link
+                        href="/profile"
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
+                      >
+                        <User size={16} /> Profile
+                      </Link>
+                      <Link
+                        href="/profile?tab=settings"
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
+                      >
+                        <Settings size={16} /> Settings
+                      </Link>
+                      <div className="h-px bg-white/10 my-1"></div>
+                      <button
+                        onClick={async () => {
+                          localStorage.removeItem("streaming_watchlist");
+                          const supabase = createClient();
+                          await supabase.auth.signOut();
+                          window.location.href = "/";
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-white/10 transition-colors"
+                      >
+                        <LogOut size={16} /> Logout
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Mobile Menu Toggle */}
-          <button 
-            className="md:hidden text-white ml-2" 
-            onClick={() => setIsMobileMenuOpen(true)}
-          >
-            <Menu size={24} />
-          </button>
-        </div>
-      </nav>
+          {/* Mobile Menu Toggle & Right Area */}
+          <div className="flex lg:hidden items-center gap-3">
+            <button
+              onClick={() => setIsSearchModalOpen(true)}
+              className="w-[38px] h-[38px] rounded-full bg-zinc-800/80 flex items-center justify-center text-gray-300 shadow-sm border border-white/10"
+            >
+              <Search size={18} strokeWidth={2.5} />
+            </button>
+            <button
+              className="w-[38px] h-[38px] rounded-full bg-red-600 flex items-center justify-center text-white shadow-lg cursor-pointer"
+              onClick={() => setIsMobileMenuOpen(true)}
+            >
+              <Menu size={18} />
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      {/* Search Modal Component */}
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+      />
 
       {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-md flex flex-col p-6 animate-fade-in md:hidden">
-          <div className="flex justify-end">
-            <button onClick={() => setIsMobileMenuOpen(false)} className="text-white bg-white/10 p-2 rounded-full">
-              <X size={24} />
+        <div className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-xl flex flex-col p-6 animate-fadeIn lg:hidden">
+          <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-full border border-white/10 shadow-sm">
+            <Link href="/" className="flex items-center gap-2 pl-2" onClick={() => setIsMobileMenuOpen(false)}>
+              <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center shadow-lg shadow-red-500/30">
+                <Play className="text-white ml-1" size={16} fill="currentColor" />
+              </div>
+              <span className="text-2xl font-bold tracking-tight text-white">
+                {brandName || "Netix"}
+              </span>
+            </Link>
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-gray-300 hover:text-white hover:bg-white/20 transition-colors"
+            >
+              <X size={20} />
             </button>
           </div>
-          
-          <div className="flex flex-col gap-6 mt-8">
-            {/* Mobile Search */}
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (searchQuery.trim()) {
-                router.push(`/browse?q=${encodeURIComponent(searchQuery.trim())}`);
-                setIsMobileMenuOpen(false);
-                setSearchQuery('');
-              }
-            }} className="relative">
-              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari film, series, anime..."
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-12 py-3 text-white placeholder:text-gray-500 text-base focus:outline-none focus:border-primary"
-              />
-            </form>
 
-            <div className="flex items-center gap-4 mb-4 pb-4 border-b border-white/10">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center">
-                <User size={24} className="text-white" />
-              </div>
-              <div>
-                <p className="font-bold text-lg text-white">User Account</p>
-                <Link href="/profile" className="text-sm text-gray-400 hover:text-primary" onClick={() => setIsMobileMenuOpen(false)}>
-                  Lihat Profil
-                </Link>
-              </div>
+          <div className="flex flex-col gap-3 mt-8 max-h-[80vh] overflow-y-auto hide-scrollbar">
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                setIsSearchModalOpen(true);
+              }}
+              className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 flex items-center gap-3 text-gray-400 shadow-sm backdrop-blur-sm"
+            >
+              <Search size={20} />
+              <span className="text-lg font-medium text-left flex-1">Search movies & shows...</span>
+            </button>
+
+            <div className="flex flex-col mt-4 bg-white/5 rounded-3xl p-2 border border-white/10 shadow-sm backdrop-blur-md">
+              {navLinks.map((link) => {
+                const isActive = pathname === link.path || (pathname === "/" && link.path === "/");
+                return (
+                  <Link
+                    key={link.name}
+                    href={link.path}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`text-lg font-semibold py-4 px-6 rounded-2xl transition-colors ${
+                      isActive 
+                        ? "bg-white text-black shadow-sm my-1" 
+                        : "text-gray-300 hover:text-white hover:bg-white/10 my-1"
+                    }`}
+                  >
+                    {link.name}
+                  </Link>
+                );
+              })}
             </div>
 
-            {navLinks.map((link) => (
-              <Link 
-                key={link.name} 
-                href={link.path}
-                className="text-2xl font-bold text-gray-300 hover:text-primary transition-colors"
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                {link.name}
-              </Link>
-            ))}
-            
-            <div className="h-px bg-white/10 my-4"></div>
-            
-            <Link 
-              href="/profile?tab=settings"
-              className="text-xl font-bold text-gray-300 hover:text-white"
+            <Link
+              href="/profile"
               onClick={() => setIsMobileMenuOpen(false)}
+              className="mt-4 text-xl font-bold text-white bg-red-600 rounded-3xl py-5 px-6 flex items-center justify-center gap-3 shadow-lg transform active:scale-95 transition-transform"
             >
-              Pengaturan
+              <User size={22} /> Go to Profile
             </Link>
-            <button 
-              className="text-xl font-bold text-red-500 text-left"
-              onClick={() => {
-                localStorage.removeItem('streaming_watchlist');
-                localStorage.removeItem('streaming_likes');
-                localStorage.removeItem('streaming_history');
-                window.location.href = '/';
-              }}
-            >
-              Keluar
-            </button>
           </div>
         </div>
       )}

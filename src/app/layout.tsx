@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { createClient } from "@/lib/supabase/server";
 import { headers } from "next/headers";
@@ -7,6 +8,8 @@ import MaintenanceMode from "@/components/MaintenanceMode";
 import Navbar from "@/components/Navbar";
 import ToastContainer from "@/components/Toast";
 import { Analytics } from "@vercel/analytics/react";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export async function generateMetadata(): Promise<Metadata> {
   const supabase = await createClient();
@@ -18,9 +21,23 @@ export async function generateMetadata(): Promise<Metadata> {
   const siteConfig = data?.value || { title: "Antigravity" };
 
   return {
-    title: `${siteConfig.title} | Film & Series Terlengkap`,
-    description:
-      "Nonton Film & Series subtitle Indonesia terbaru gratis dengan kualitas HD.",
+    metadataBase: new URL('https://v2.netix.my.id'),
+    title: {
+      default: `${siteConfig.title} | Film & Series Terlengkap`,
+      template: `%s | ${siteConfig.title}`,
+    },
+    description: "Nonton Film & Series subtitle Indonesia terbaru gratis dengan kualitas HD.",
+    openGraph: {
+      title: `${siteConfig.title} | Film & Series Terlengkap`,
+      description: "Nonton Film & Series subtitle Indonesia terbaru gratis dengan kualitas HD.",
+      type: 'website',
+      siteName: siteConfig.title,
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+    manifest: '/manifest.json'
   };
 }
 
@@ -70,7 +87,7 @@ export default async function RootLayout({
   const navbarColor = siteConfig.navbar_color || "#38bdf8";
 
   return (
-    <html lang="id" suppressHydrationWarning>
+    <html lang="id" suppressHydrationWarning className={inter.variable}>
       <head>
         <style
           dangerouslySetInnerHTML={{
@@ -84,7 +101,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body>
+      <body className="font-sans antialiased text-gray-100 bg-black min-h-screen">
         {isAdminRoute || isAuthRoute ? (
           /* Admin/Auth routes: just render children */
           <>
@@ -130,8 +147,8 @@ export default async function RootLayout({
                   </Link>
                 </div>
                 <div className="text-gray-600 text-sm">
-                  &copy; {new Date().getFullYear()} {siteConfig.title}. Built
-                  with Antigravity.
+                  &copy; {new Date().getFullYear()} {siteConfig.title}. All
+                  rights reserved.
                 </div>
               </div>
             </footer>

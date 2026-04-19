@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 export interface WatchlistItem {
   id: string;
@@ -42,27 +43,68 @@ export function useWatchlist() {
   const [items, setItems] = useState<WatchlistItem[]>([]);
 
   useEffect(() => {
-    setItems(getStorageArray<WatchlistItem>(WATCHLIST_KEY));
+    const local = getStorageArray<WatchlistItem>(WATCHLIST_KEY);
+    setItems(local);
+    
+    // Sync from DB if logged in
+    async function syncDb() {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const { data } = await supabase.from('watchlist').select('content_id, contents(*)').eq('user_id', session.user.id);
+        if (data) {
+          const dbItems = (data as any[]).map(d => {
+            const content = Array.isArray(d.contents) ? d.contents[0] : d.contents;
+            return {
+              id: content.id,
+              title: content.title,
+              type: content.type,
+              poster_path: content.poster_path,
+              vote_average: typeof content.vote_average === 'number' ? content.vote_average : parseFloat(content.vote_average || '0'),
+              release_date: content.release_date,
+              addedAt: new Date(content.created_at || Date.now()).getTime()
+            };
+          });
+          setItems(dbItems);
+          setStorageArray(WATCHLIST_KEY, dbItems);
+        }
+      }
+    }
+    syncDb();
   }, []);
 
   const isInWatchlist = useCallback((id: string) => {
     return items.some(item => item.id === id);
   }, [items]);
 
-  const addToWatchlist = useCallback((item: WatchlistItem) => {
+  const addToWatchlist = useCallback(async (item: WatchlistItem) => {
     const current = getStorageArray<WatchlistItem>(WATCHLIST_KEY);
     if (current.some(i => i.id === item.id)) return false;
     const updated = [{ ...item, addedAt: Date.now() }, ...current];
     setStorageArray(WATCHLIST_KEY, updated);
     setItems(updated);
+    
+    // Sync to DB
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await supabase.from('watchlist').upsert({ user_id: session.user.id, content_id: item.id }, { onConflict: 'user_id,content_id' });
+    }
     return true;
   }, []);
 
-  const removeFromWatchlist = useCallback((id: string) => {
+  const removeFromWatchlist = useCallback(async (id: string) => {
     const current = getStorageArray<WatchlistItem>(WATCHLIST_KEY);
     const updated = current.filter(i => i.id !== id);
     setStorageArray(WATCHLIST_KEY, updated);
     setItems(updated);
+    
+    // Remove from DB
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await supabase.from('watchlist').delete().match({ user_id: session.user.id, content_id: id });
+    }
   }, []);
 
   const toggleWatchlist = useCallback((item: WatchlistItem) => {

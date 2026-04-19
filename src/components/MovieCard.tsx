@@ -1,138 +1,92 @@
-"use client";
-
-import { usePathname, useRouter } from 'next/navigation';
-import { Play, Plus, Info, ThumbsUp, Star, Check } from 'lucide-react';
-import { useWatchlist, useLikes } from '@/lib/useWatchlist';
-import { showToast } from '@/components/Toast';
+import Image from 'next/image';
+import Link from 'next/link';
+import { Star } from 'lucide-react';
 
 interface MovieCardProps {
   item: any;
-  progress?: number; // 0 to 100
   isNew?: boolean;
+  progress?: number;
+  rank?: number; // For the top 10 numbers
 }
 
-export default function MovieCard({ item, progress, isNew }: MovieCardProps) {
-  const getImageUrl = (path: string | undefined | null) => 
-    path ? `https://image.tmdb.org/t/p/w500${path}` : `https://placehold.co/400x600/1a1a1a/ffffff?text=${encodeURIComponent(item.title)}`;
-  
-  const year = (item.metadata?.release_date || item.metadata?.first_air_date || '').split('-')[0];
-  
-  const { isInWatchlist, toggleWatchlist } = useWatchlist();
-  const { isLiked, toggleLike } = useLikes();
+export default function MovieCard({ item, isNew, progress, rank }: MovieCardProps) {
+  const posterPath = item.poster_path 
+    ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
+    : 'https://via.placeholder.com/500x750?text=No+Image';
 
-  const router = useRouter();
-  const inList = isInWatchlist(String(item.id));
-  const liked = isLiked(String(item.id));
-
-  const handleNavigate = (e: React.MouseEvent) => {
-    router.push(`/watch/${item.id}`);
-  };
-
-  const handleAddToList = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const added = toggleWatchlist({
-      id: String(item.id),
-      title: item.title,
-      type: item.type,
-      poster_path: item.metadata?.poster_path,
-      vote_average: item.metadata?.vote_average,
-      release_date: item.metadata?.release_date,
-      first_air_date: item.metadata?.first_air_date,
-      addedAt: Date.now(),
-    });
-    showToast(added ? `"${item.title}" ditambahkan ke Daftar!` : `"${item.title}" dihapus dari Daftar`, added ? 'success' : 'info');
-  };
-
-  const handleLike = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const nowLiked = toggleLike(String(item.id));
-    showToast(nowLiked ? `Menyukai "${item.title}"` : `Batal menyukai "${item.title}"`, nowLiked ? 'success' : 'info');
-  };
+  // Format rating (e.g., 8.5)
+  const rating = item.vote_average ? item.vote_average.toFixed(1) : null;
+  const isTV = Boolean(item.name);
+  const title = item.title || item.name;
+  const year = (item.release_date || item.first_air_date || '').split('-')[0];
 
   return (
-    <div 
-      className="relative group w-full cursor-pointer flex-shrink-0 transition-transform duration-500 hover:z-50 hover:scale-105"
-      onClick={handleNavigate}
-    >
-      <div className="relative w-full aspect-[2/3] rounded-md md:rounded-lg overflow-hidden bg-card border border-white/5">
-        <img 
-          src={getImageUrl(item.metadata?.poster_path)} 
-          alt={item.title}
-          className="w-full h-full object-cover text-[10px] text-gray-500"
-          loading="lazy"
-        />
+    <div className="flex flex-col w-full group relative">
+      <Link href={`/watch/${item.id}?type=${isTV ? 'tv' : 'movie'}`} className="block relative w-full aspect-[2/3] rounded-sm overflow-hidden bg-[#1a1a1a] shadow-sm border border-transparent transition-all duration-300 group-hover:border-white/30">
         
-        {/* Top Badges */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1 z-20">
-          {isNew && (
-            <span className="bg-green-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded shadow-lg uppercase">
-              Baru
-            </span>
-          )}
-        </div>
-        <div className="absolute top-2 right-2 z-20">
-           <span className="bg-primary text-white text-[10px] font-black px-1.5 py-0.5 rounded shadow-lg">
-             HD
-           </span>
-        </div>
-
-        {/* Hover Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 z-10">
-          <h3 className="text-white font-bold text-sm line-clamp-2 drop-shadow-md">{item.title}</h3>
-          
-          <div className="flex items-center gap-2 mt-1 mb-2 text-xs font-semibold text-gray-300">
-            <span className="flex items-center text-yellow-400">
-              <Star size={12} fill="currentColor" className="mr-0.5" />
-              {item.metadata?.vote_average?.toFixed(1) || 'N/A'}
-            </span>
-            <span>{year}</span>
-            <span className="px-1 border border-gray-500 rounded text-[9px] uppercase">
-              {item.type === 'tv' ? 'Series' : item.type}
-            </span>
+        {/* Ranked Number */}
+        {rank !== undefined ? (
+          <div className="absolute top-0 left-0.5 z-20 font-black text-3xl md:text-4xl text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] opacity-95 tracking-tighter" style={{ WebkitTextStroke: '1px black' }}>
+            {rank}
           </div>
-
-          {/* Action Buttons Row */}
-          <div className="flex items-center gap-2 mt-1">
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleNavigate(e); }}
-              className="bg-white text-black p-1.5 rounded-full hover:bg-gray-200 transition-colors" 
-              title="Play"
-            >
-              <Play size={14} fill="currentColor" />
-            </button>
-            <button 
-              onClick={handleAddToList}
-              className={`p-1.5 rounded-full transition-colors border ${inList ? 'bg-primary border-primary text-white' : 'border-gray-400 text-white hover:border-white'}`} 
-              title={inList ? 'Hapus dari Daftar' : 'Tambah ke Daftar'}
-            >
-              {inList ? <Check size={14} /> : <Plus size={14} />}
-            </button>
-            <button 
-              onClick={handleLike}
-              className={`p-1.5 rounded-full transition-colors border ${liked ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-400 text-white hover:border-white'}`} 
-              title={liked ? 'Batal Suka' : 'Suka'}
-            >
-              <ThumbsUp size={14} />
-            </button>
-            <div className="flex-1"></div>
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleNavigate(e); }}
-              className="border border-gray-400 text-white p-1.5 rounded-full hover:border-white hover:text-white transition-colors" 
-              title="Info"
-            >
-              <Info size={14} />
-            </button>
-          </div>
-        </div>
-
-        {/* Progress Bar (if watched) */}
-        {progress !== undefined && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700 z-20">
-            <div className="h-full bg-primary" style={{ width: `${progress}%` }}></div>
+        ) : (
+          /* Top Left Box - Type Badge */
+          <div className="absolute top-1 left-1 bg-black/60 backdrop-blur-md text-white text-[7px] md:text-[9px] font-bold px-1.5 py-0.5 rounded-sm z-10 uppercase border border-white/10">
+            {isTV ? 'TV' : 'Movie'}
           </div>
         )}
+
+        {/* Hover overlay subtle dark */}
+        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+        {/* Top Right Box - Quality Badge */}
+        <div className="absolute top-1 right-1 bg-green-500/90 text-white text-[7px] md:text-[9px] font-bold px-1.5 py-0.5 rounded-sm z-10 tracking-wider uppercase border border-green-600/30">
+          {isTV ? 'EPS' : 'HD'}
+        </div>
+
+        <Image
+          src={posterPath}
+          alt={title || 'Movie Thumbnail'}
+          fill
+          sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
+          className="object-cover transition-transform duration-300 group-hover:scale-105 lazy-image opacity-90 group-hover:opacity-100"
+          loading="lazy"
+        />
+
+        {/* Bottom Left Box - Rating Badge */}
+        {rating && (
+          <div className="absolute bottom-1 left-1 bg-[#F5C518]/95 text-black text-[8px] md:text-[10px] font-black px-1.5 py-0.5 rounded-sm shadow-md z-10 flex items-center gap-0.5">
+            <Star size={9} fill="currentColor" strokeWidth={0.5} className="text-black" />
+            {rating}
+          </div>
+        )}
+
+        {/* Bottom Progress Bar */}
+        {progress !== undefined && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/30 truncate z-20">
+            <div className="h-full bg-[#E50914]" style={{ width: `${progress}%` }} />
+          </div>
+        )}
+      </Link>
+
+      {/* Info below the poster */}
+      <div className="mt-1.5 px-0.5 flex flex-col">
+        <Link 
+          href={`/watch/${item.id}?type=${isTV ? 'tv' : 'movie'}`} 
+          className="text-white/90 font-semibold text-[10px] md:text-[12px] leading-tight line-clamp-1 group-hover:text-white transition-colors"
+          title={title}
+        >
+          {title}
+        </Link>
+        <div className="text-gray-500 text-[9px] md:text-[10px] font-bold flex items-center gap-1 mt-0.5 uppercase tracking-wide">
+          <span className="text-[#E50914]">{isTV ? 'TV' : 'Movie'}</span>
+          {year && (
+            <>
+              <span className="text-gray-700">•</span>
+              <span>{year}</span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

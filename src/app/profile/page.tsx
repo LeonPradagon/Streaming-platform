@@ -3,10 +3,11 @@
 import { useSearchParams } from 'next/navigation';
 import { User, Play, List, Settings, LogOut, ChevronRight, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useState, Suspense } from 'react';
+import { useState, Suspense, useEffect } from 'react';
 import MovieCard from '@/components/MovieCard';
 import { useWatchlist, useHistory, WatchlistItem, HistoryItem } from '@/lib/useWatchlist';
 import { showToast } from '@/components/Toast';
+import { createClient } from '@/lib/supabase/client';
 
 function ProfileContent() {
   const searchParams = useSearchParams();
@@ -15,6 +16,33 @@ function ProfileContent() {
   const [emailNotif, setEmailNotif] = useState(true);
   const [quality, setQuality] = useState('auto');
   const [displayName, setDisplayName] = useState('Movie Buff');
+  const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadProfile() {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        setUserId(session.user.id);
+        setUserEmail(session.user.email || '');
+        setDisplayName(session.user.user_metadata?.full_name || 'Member');
+        
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('preferences')
+          .eq('id', session.user.id)
+          .single();
+          
+        if (profile?.preferences) {
+          if (profile.preferences.emailNotif !== undefined) setEmailNotif(profile.preferences.emailNotif);
+          if (profile.preferences.quality !== undefined) setQuality(profile.preferences.quality);
+        }
+      }
+    }
+    loadProfile();
+  }, []);
 
   const { items: watchlistItems, removeFromWatchlist } = useWatchlist();
   const { items: historyItems, clearHistory } = useHistory();
@@ -32,7 +60,13 @@ function ProfileContent() {
     },
   });
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
+    if (userId) {
+      const supabase = createClient();
+      await supabase.from('profiles').update({
+        preferences: { emailNotif, quality }
+      }).eq('id', userId);
+    }
     showToast('Pengaturan berhasil disimpan!', 'success');
   };
 
@@ -96,10 +130,12 @@ function ProfileContent() {
           
           <div className="mt-12 pt-6 border-t border-white/10">
             <button 
-              onClick={() => {
+              onClick={async () => {
                 localStorage.removeItem('streaming_watchlist');
                 localStorage.removeItem('streaming_likes');
                 localStorage.removeItem('streaming_history');
+                const supabase = createClient();
+                await supabase.auth.signOut();
                 showToast('Anda telah keluar', 'info');
                 window.location.href = '/';
               }}
@@ -204,7 +240,7 @@ function ProfileContent() {
                 
                 <div className="flex flex-col gap-2">
                   <label className="text-sm text-gray-400 font-bold uppercase tracking-wider">Email Utama</label>
-                  <input type="email" defaultValue="user@antigravity.id" disabled className="bg-black/80 border border-white/5 rounded-lg px-4 py-3 text-gray-500 cursor-not-allowed" />
+                  <input type="email" value={userEmail || "Memuat..."} disabled className="bg-black/80 border border-white/5 rounded-lg px-4 py-3 text-gray-500 cursor-not-allowed" />
                 </div>
 
                 <div className="pt-6 border-t border-white/10">

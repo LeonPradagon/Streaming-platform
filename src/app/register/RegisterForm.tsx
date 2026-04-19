@@ -75,7 +75,7 @@ export default function RegisterForm() {
                 name="full_name" 
                 type="text" 
                 required 
-                placeholder="Jhansen Wilson"
+                placeholder="Nama Anda"
                 style={{ 
                   width: '100%', 
                   padding: '0.8rem 1rem 0.8rem 3rem', 

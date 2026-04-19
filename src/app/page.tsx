@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase';
 import { fetchTMDBMetadata, classifyPlatform, PLATFORM_LABELS, PLATFORM_COLORS, Platform } from '@/lib/tmdb';
 import HeroCarousel from '@/components/HeroCarousel';
 import ContentRow from '@/components/ContentRow';
+import PersonalizedRows from '@/components/PersonalizedRows';
+import { Flame, Sparkles, Tv, MonitorPlay, Clapperboard, Film as FilmIcon } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,13 +35,14 @@ export default async function Home() {
       metadata: {
         id: item.tmdb_id,
         title: item.title,
-        overview: item.overview || '',
-        poster_path: item.poster_path,
-        backdrop_path: item.backdrop_path,
-        vote_average: item.vote_average || 0,
-        release_date: item.release_date,
-        genres: (item.genre_names || []).map((name: string) => ({ id: 0, name })),
-        credits: { cast: item.cast_data || [] }
+        overview: item.overview || item.metadata?.overview || '',
+        poster_path: item.poster_path || item.metadata?.poster_path,
+        backdrop_path: item.backdrop_path || item.metadata?.backdrop_path,
+        vote_average: item.vote_average || item.metadata?.vote_average || 0,
+        popularity: item.popularity || item.metadata?.popularity || 0,
+        release_date: item.release_date || item.metadata?.release_date || item.metadata?.first_air_date,
+        genres: (item.genre_names || item.metadata?.genres?.map((g: any) => g.name) || []).map((name: string) => ({ id: 0, name })),
+        credits: { cast: item.cast_data || item.metadata?.credits?.cast || [] }
       },
       platform: item.platform || 'other' as Platform 
     };
@@ -118,8 +121,22 @@ export default async function Home() {
   });
 
   // Layout logic
-  const trending = [...validContent].sort((a, b) => (b.metadata?.vote_average || 0) - (a.metadata?.vote_average || 0));
-  const heroItems = trending.slice(0, 5);
+  const currTime = new Date().getTime();
+
+  // Trending = highest popularity directly from TMDB
+  const trending = [...validContent]
+    .filter(a => (a.metadata?.popularity || 0) > 0)
+    .sort((a, b) => (b.metadata?.popularity || 0) - (a.metadata?.popularity || 0));
+    
+  // Latest = newest release_date, but already released (no future unreleased movies)
+  const latest = [...validContent]
+    .filter(a => a.metadata?.release_date && new Date(a.metadata.release_date).getTime() <= currTime)
+    .sort((a, b) => new Date(b.metadata.release_date).getTime() - new Date(a.metadata.release_date).getTime());
+
+  // Hero uses a mix of newest high-quality content
+  const heroItems = [...latest]
+    .filter(a => (a.metadata?.vote_average || 0) >= 5)
+    .slice(0, 5);
 
   const TYPE_LABELS: Record<string, string> = {
     drakor: '🇰🇷 Drama Korea (Drakor)',
@@ -143,21 +160,29 @@ export default async function Home() {
       )}
 
       {/* Main Content Sections */}
-      <div className="relative z-30 mt-[-5vw] flex flex-col gap-8 md:gap-12 pb-20">
+      <div className="relative z-30 flex flex-col gap-3 pb-20 mt-2 px-0 md:px-0 bg-[#0f0f0f]">
         
-        {/* Trending */}
+        {/* Continue Watching & My List (Client Side) */}
+        <PersonalizedRows />
+
+        {/* New Releases */}
+        {latest.length > 0 && (
+          <ContentRow title="New Releases" items={latest} isNewRow={true} icon={<Sparkles size={22} />} />
+        )}
+
+        {/* Trending Now */}
         {trending.length > 0 && (
-          <ContentRow title="🔥 Trending Minggu Ini" items={trending} isNewRow={false} />
+          <ContentRow title="Trending Now" items={trending} isNewRow={false} isTrendingRow={true} icon={<Flame size={22} />} />
         )}
 
         {/* Specialized Types (Primary Rows) */}
         {typeGroups.drakor.length > 0 && (
-          <ContentRow title={TYPE_LABELS.drakor} items={typeGroups.drakor} />
+          <ContentRow title={TYPE_LABELS.drakor} items={typeGroups.drakor} icon={<Tv size={22} />} />
         )}
 
-        {/* Action Genre */}
+        {/* Popular Movies */}
         {genreGroups['Aksi & Petualangan'].length > 0 && (
-          <ContentRow title="💥 Aksi & Petualangan" items={genreGroups['Aksi & Petualangan']} />
+          <ContentRow title="Popular Movies" items={genreGroups['Aksi & Petualangan']} icon={<Clapperboard size={22} />} />
         )}
 
         {/* Netflix Platform */}
@@ -171,19 +196,19 @@ export default async function Home() {
 
         {/* Drachin */}
         {typeGroups.drachin.length > 0 && (
-          <ContentRow title={TYPE_LABELS.drachin} items={typeGroups.drachin} />
+          <ContentRow title={TYPE_LABELS.drachin} items={typeGroups.drachin} icon={<MonitorPlay size={22} />} />
         )}
 
-        {/* Drama Genre */}
+        {/* Top Rated */}
         {genreGroups['Drama & Romansa'].length > 0 && (
-          <ContentRow title="🎭 Drama & Romansa" items={genreGroups['Drama & Romansa']} />
+          <ContentRow title="Top Rated" items={genreGroups['Drama & Romansa']} icon={<FilmIcon size={22} />} />
         )}
 
         {/* Anime / Animation */}
         {(typeGroups.anime.length > 0 || typeGroups.donghua.length > 0 || genreGroups['Animasi'].length > 0) && (
           <ContentRow 
             title={typeGroups.anime.length > 0 ? TYPE_LABELS.anime : "🎨 Animasi Terpopuler"} 
-            items={[...typeGroups.anime, ...typeGroups.donghua, ...genreGroups['Animasi']]} 
+            items={Array.from(new Map([...typeGroups.anime, ...typeGroups.donghua, ...genreGroups['Animasi']].map(item => [item.id, item])).values())} 
             platformColor={PLATFORM_COLORS.anime} 
           />
         )}

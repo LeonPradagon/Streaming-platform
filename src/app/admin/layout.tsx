@@ -1,6 +1,7 @@
 import { logout } from "@/app/auth/actions";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   BarChart3,
   Film,
@@ -12,6 +13,7 @@ import {
   Search,
   CheckCircle2,
   Activity,
+  AlertTriangle,
 } from "lucide-react";
 
 export default async function AdminLayout({
@@ -23,6 +25,28 @@ export default async function AdminLayout({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || (profile.role !== "super_admin" && profile.role !== "moderator")) {
+    redirect("/");
+  }
+
+  const { data: siteConfigReq } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "site_config")
+    .single();
+    
+  const brandName = siteConfigReq?.value?.title || "OHAYO";
 
   return (
     <div
@@ -58,7 +82,7 @@ export default async function AdminLayout({
               gap: "0.75rem",
             }}
           >
-            OHAYO{" "}
+            {brandName}{" "}
             <span
               style={{
                 fontSize: "0.6rem",
@@ -110,6 +134,11 @@ export default async function AdminLayout({
             href="/admin/scraper"
             icon={<Activity size={20} />}
             label="Scraper Control"
+          />
+          <SidebarLink
+            href="/admin/reports"
+            icon={<AlertTriangle size={20} />}
+            label="Laporan Kendala"
           />
           <div
             style={{

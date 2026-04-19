@@ -5,15 +5,41 @@ import { Play, Server, List, ChevronLeft, ChevronRight, Star, Calendar, Clock } 
 import VideoPlayer from '@/components/VideoPlayer';
 import WatchActions from '@/components/WatchActions';
 
+import type { Metadata, ResolvingMetadata } from 'next';
+
 export const dynamic = 'force-dynamic';
+
+type Props = {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ s?: string, e?: string, ss?: string }>
+}
+
+export async function generateMetadata(
+  { params }: Props,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  const { id } = await params;
+  const { data: content } = await supabase.from('contents').select('title, tmdb_id, type').eq('id', id).single();
+  
+  if (!content) return { title: 'Not Found - NETIX' };
+  
+  const metadata = await fetchTMDBMetadata(content.tmdb_id, content.type === 'movie' ? 'movie' : 'tv');
+  
+  return {
+    title: `${content.title} - Nonton Gratis di NETIX`,
+    description: metadata?.overview || `Nonton streaming ${content.title} sub indo HD gratis di NETIX.`,
+    openGraph: {
+      title: `${content.title} - NETIX`,
+      description: metadata?.overview?.substring(0, 150) + '...',
+      images: [getTMDBImageUrl(metadata?.backdrop_path || metadata?.poster_path || '', 'original')],
+    },
+  }
+}
 
 export default async function WatchPage({ 
   params,
   searchParams 
-}: { 
-  params: Promise<{ id: string }>,
-  searchParams: Promise<{ s?: string, e?: string, ss?: string }>
-}) {
+}: Props) {
   const { id } = await params;
   const { s, e, ss } = await searchParams;
   
@@ -44,26 +70,22 @@ export default async function WatchPage({
   let finalUrl = activeLink?.url || '';
   const isVideoProvider = finalUrl.includes('vidsrc') || finalUrl.includes('embed.su') || finalUrl.includes('vidlink') || finalUrl.includes('jenius');
 
-  if (!isMovie) {
-    if (isVideoProvider) {
-       const [urlWithoutQuery, query] = finalUrl.split('?');
-       if (urlWithoutQuery.includes('vidlink')) {
-           const baseUrl = urlWithoutQuery.split('/tv/')[0] + '/tv/' + content.tmdb_id;
-           finalUrl = `${baseUrl}/${currentSeason}/${currentEpisode}${query ? '?' + query : ''}`;
-       } else {
-           const baseUrl = urlWithoutQuery.split('/embed/')[0] + '/embed/' + (urlWithoutQuery.includes('tv') ? 'tv/' : 'movie/') + content.tmdb_id;
-           finalUrl = `${baseUrl}/${currentSeason}/${currentEpisode}${query ? '?' + query : ''}`;
-       }
-    }
-  } else {
-    // For movies, ensure no trailing season/episode
-    if (isVideoProvider) {
-       const [urlWithoutQuery, query] = finalUrl.split('?');
-       if (urlWithoutQuery.includes('vidlink')) {
-           finalUrl = urlWithoutQuery.split('/movie/')[0] + '/movie/' + content.tmdb_id + (query ? '?' + query : '');
-       } else {
-           finalUrl = urlWithoutQuery.split('/embed/')[0] + '/embed/movie/' + content.tmdb_id + (query ? '?' + query : '');
-       }
+  if (isVideoProvider) {
+    const [urlWithoutQuery, query] = finalUrl.split('?');
+    const queryString = query ? `?${query}` : '';
+    
+    if (urlWithoutQuery.includes('vidlink')) {
+      const type = isMovie ? '/movie/' : '/tv/';
+      const baseUrl = urlWithoutQuery.split(type)[0] + type + content.tmdb_id;
+      finalUrl = isMovie 
+        ? `${baseUrl}${queryString}`
+        : `${baseUrl}/${currentSeason}/${currentEpisode}${queryString}`;
+    } else {
+      const type = urlWithoutQuery.includes('tv') ? 'tv/' : 'movie/';
+      const baseUrl = urlWithoutQuery.split('/embed/')[0] + '/embed/' + type + content.tmdb_id;
+      finalUrl = isMovie 
+        ? `${baseUrl}${queryString}`
+        : `${baseUrl}/${currentSeason}/${currentEpisode}${queryString}`;
     }
   }
 
@@ -118,7 +140,11 @@ export default async function WatchPage({
                 <VideoPlayer 
                   src={finalUrl} 
                   title={content.title} 
-                  backdrop={getTMDBImageUrl(metadata?.backdrop_path || '', 'original')} 
+                  backdrop={getTMDBImageUrl(metadata?.backdrop_path || '', 'original')}
+                  tmdbId={content.tmdb_id}
+                  mediaType={isMovie ? 'movie' : 'tv'}
+                  season={isMovie ? undefined : currentSeason}
+                  episode={isMovie ? undefined : currentEpisode}
                 />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-gray-500 relative">

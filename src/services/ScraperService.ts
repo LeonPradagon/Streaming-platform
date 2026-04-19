@@ -9,10 +9,16 @@ config(); // also check .env if exists
 
 // Configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const tmdbApiKey = process.env.TMDB_API_KEY!;
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Use service_role key if available (bypasses RLS for backend operations)
+// Falls back to anon key if not set (may fail writes with strict RLS)
+if (!supabaseServiceKey) {
+  console.warn('[ScraperService] SUPABASE_SERVICE_ROLE_KEY not set. Using anon key - writes may be blocked by RLS.');
+}
+const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
 
 export interface ScrapeTaskSummary {
   items_processed: number;
@@ -146,6 +152,7 @@ export class ScraperService {
 
         // Fetch Episodes for this season
         const sRes = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
+        if (!sRes.ok) continue;
         const sData = await sRes.json();
 
         if (sData.episodes) {
@@ -163,7 +170,6 @@ export class ScraperService {
             }
           }
         }
-      }
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
     }
@@ -175,7 +181,7 @@ export class ScraperService {
   public async runDiscovery(pagesPerGenre: number = 3): Promise<ScrapeTaskSummary> {
     const logId = await this.createLog('Deep Discovery Scrape');
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    const config = await this.getScraperConfig();
+    const scraperConfig = await this.getScraperConfig();
     const progress = await this.getScraperProgress();
 
     try {
@@ -185,6 +191,10 @@ export class ScraperService {
       
       const { genres: movieGenres } = await movieGenreRes.json();
       const { genres: tvGenres } = await tvGenreRes.json();
+
+      if (!movieGenres || !tvGenres) {
+         throw new Error("Failed to fetch genres from TMDB - API limit or invalid key");
+      }
 
       const allTasks = [
         ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
@@ -209,6 +219,7 @@ export class ScraperService {
             summary.items_processed++;
             try {
               const resMetadata = await fetch(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+              if (!resMetadata.ok) throw new Error("TMDB Metadata fetch failed");
               const metadata: any = await resMetadata.json();
               
               // Use Advanced Classification
@@ -222,7 +233,7 @@ export class ScraperService {
                   tmdb_id: item.id,
                   title: item.title || item.name,
                   type: finalType,
-                  status: config.auto_approve ? 'approved' : 'pending',
+                  status: scraperConfig.auto_approve ? 'approved' : 'pending',
                   platform,
                   cast_data: metadata.credits?.cast?.slice(0, 10) || [],
                   genre_names: genreNames,
@@ -230,6 +241,7 @@ export class ScraperService {
                   poster_path: metadata.poster_path,
                   backdrop_path: metadata.backdrop_path,
                   vote_average: metadata.vote_average,
+                  popularity: item.popularity || metadata.popularity || 0,
                   release_date: metadata.release_date || metadata.first_air_date,
                   is_healthy: true // Assume new items are healthy
                 }, { onConflict: 'tmdb_id' })
@@ -238,7 +250,7 @@ export class ScraperService {
               if (upsertError) throw upsertError;
               
               // Add links
-              await this.addProviderLinks(dbItem.id, genre.type, item.id, config);
+              await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
               
               // If not movie, scrape series details
               if (genre.type === 'tv') {
@@ -259,6 +271,7 @@ export class ScraperService {
       
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
+      console.error("Discovery error:", err);
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
@@ -271,7 +284,7 @@ export class ScraperService {
   public async runTrendingDiscovery(): Promise<ScrapeTaskSummary> {
     const logId = await this.createLog('Trending Discovery');
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    const config = await this.getScraperConfig();
+    const scraperConfig = await this.getScraperConfig();
 
     try {
       const url = `https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`;
@@ -285,6 +298,7 @@ export class ScraperService {
           summary.items_processed++;
           try {
             const resMetadata = await fetch(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+            if (!resMetadata.ok) throw new Error("TMDB Metadata fetch failed");
             const metadata: TMDBMetadata = await resMetadata.json();
             
             // Use Advanced Classification
@@ -298,7 +312,7 @@ export class ScraperService {
                 tmdb_id: item.id,
                 title: item.title || item.name,
                 type: finalType,
-                status: config.auto_approve ? 'approved' : 'pending',
+                status: scraperConfig.auto_approve ? 'approved' : 'pending',
                 platform,
                 cast_data: metadata.credits?.cast?.slice(0, 10) || [],
                 genre_names: genreNames,
@@ -306,6 +320,7 @@ export class ScraperService {
                 poster_path: metadata.poster_path,
                 backdrop_path: metadata.backdrop_path,
                 vote_average: metadata.vote_average,
+                popularity: item.popularity || metadata.popularity || 0,
                 release_date: metadata.release_date || metadata.first_air_date,
                 is_healthy: true
               }, { onConflict: 'tmdb_id' })
@@ -314,10 +329,12 @@ export class ScraperService {
             if (upsertError) throw upsertError;
 
             // Report progress
-            await this.updateLogProgress(logId!, summary.items_processed, data.results.length, item.title || item.name);
+            if (logId) {
+              await this.updateLogProgress(logId, summary.items_processed, data.results.length, item.title || item.name);
+            }
             
             // Add links
-            await this.addProviderLinks(dbItem.id, finalType, item.id, config);
+            await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
             
             if (item.media_type === 'tv') {
               await this.scrapeTVDetails(dbItem.id, item.id);
@@ -342,7 +359,7 @@ export class ScraperService {
   public async runFullRoutine(): Promise<ScrapeTaskSummary[]> {
     console.log('🚀 Starting Full Scraper Routine...');
     const trending = await this.runTrendingDiscovery();
-    const discovery = await this.runDiscovery(2); // 2 pages per genre
+    const discovery = await this.runDiscovery(5); // 5 pages per genre (massive payload)
     return [trending, discovery];
   }
 
@@ -418,11 +435,13 @@ export class ScraperService {
               poster_path: metadata.poster_path,
               backdrop_path: metadata.backdrop_path,
               vote_average: metadata.vote_average,
+              popularity: metadata.popularity || 0,
               release_date: metadata.release_date || metadata.first_air_date
             }).eq('id', item.id);
 
-            // Report sync progress
-            await this.updateLogProgress(logId!, summary.items_processed, contents.length, item.title);
+            if (logId) {
+              await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title);
+            }
 
             // Small delay to prevent TMDB rate limit (429) during bulk sync
             await new Promise(resolve => setTimeout(resolve, 200));
@@ -445,16 +464,16 @@ export class ScraperService {
     return summary;
   }
 
-  private async addProviderLinks(contentId: string, type: string, tmdbId: number, config: { videospider_enabled?: boolean, superembed_enabled?: boolean }) {
+  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: { videospider_enabled?: boolean, superembed_enabled?: boolean }) {
     const isTV = type === 'tv';
     const providers = [];
 
-    if (config.videospider_enabled) {
-      providers.push({ name: 'Speed 1', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
+    if (scraperConfig.videospider_enabled) {
+      providers.push({ name: 'Server 1', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
     }
     
-    if (config.superembed_enabled) {
-      providers.push({ name: 'Speed 2', url: `https://vidsrc.pm/embed/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
+    if (scraperConfig.superembed_enabled) {
+      providers.push({ name: 'Server 2', url: `https://vidsrc.pm/embed/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
     }
 
     for (const p of providers) {
