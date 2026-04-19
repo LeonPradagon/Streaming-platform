@@ -6,6 +6,7 @@ import Link from "next/link";
 import MaintenanceMode from "@/components/MaintenanceMode";
 import Navbar from "@/components/Navbar";
 import ToastContainer from "@/components/Toast";
+import { Analytics } from "@vercel/analytics/next";
 
 export async function generateMetadata(): Promise<Metadata> {
   const supabase = await createClient();
@@ -221,6 +222,7 @@ export default async function RootLayout({
           </div>
         )}
         <ToastContainer />
+        <Analytics />
       </body>
     </html>
   );
