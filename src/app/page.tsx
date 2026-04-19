@@ -25,7 +25,7 @@ export default async function Home() {
   }
 
   // 2. Map stored metadata (no more bulk TMDB API calls!)
-  const validContent = allContent.map((item) => {
+  const validContent = allContent.map((item: any) => {
     // We treat the database row as the source of truth for metadata
     // This dramatically speeds up page loads and prevents 429 errors
     return { 
@@ -56,7 +56,7 @@ export default async function Home() {
     'drajep': [],
   };
 
-  validContent.forEach(item => {
+  validContent.forEach((item: any) => {
     if (typeGroups[item.type]) {
       typeGroups[item.type].push(item);
     }
@@ -72,31 +72,31 @@ export default async function Home() {
     'Sci-Fi & Fantasi': [],
   };
 
-  validContent.forEach(item => {
+  validContent.forEach((item: any) => {
     const genres = (item.genre_names || item.metadata?.genres?.map((g: any) => g.name) || []).map((g: string) => g.toLowerCase());
     
     // Aksi & Petualangan
-    if (genres.some(g => ['action', 'adventure', 'war', 'martial arts', 'aksi', 'petualangan'].includes(g))) {
+    if (genres.some((g: string) => ['action', 'adventure', 'war', 'martial arts', 'aksi', 'petualangan'].includes(g))) {
       genreGroups['Aksi & Petualangan'].push(item);
     }
     // Drama & Romansa
-    if (genres.some(g => ['drama', 'romance', 'romansa'].includes(g))) {
+    if (genres.some((g: string) => ['drama', 'romance', 'romansa'].includes(g))) {
       genreGroups['Drama & Romansa'].push(item);
     }
     // Horor & Misteri
-    if (genres.some(g => ['horror', 'thriller', 'mystery', 'misteri', 'horor'].includes(g))) {
+    if (genres.some((g: string) => ['horror', 'thriller', 'mystery', 'misteri', 'horor'].includes(g))) {
       genreGroups['Horor & Misteri'].push(item);
     }
     // Komedi
-    if (genres.some(g => ['comedy', 'family', 'komedi', 'keluarga'].includes(g))) {
+    if (genres.some((g: string) => ['comedy', 'family', 'komedi', 'keluarga'].includes(g))) {
       genreGroups['Komedi'].push(item);
     }
     // Animasi
-    if (genres.some(g => ['animation', 'kids', 'anak-anak', 'animasi'].includes(g))) {
+    if (genres.some((g: string) => ['animation', 'kids', 'anak-anak', 'animasi'].includes(g))) {
       genreGroups['Animasi'].push(item);
     }
     // Sci-Fi & Fantasi
-    if (genres.some(g => ['science fiction', 'fantasy', 'sci-fi & fantasy', 'fantasi'].includes(g))) {
+    if (genres.some((g: string) => ['science fiction', 'fantasy', 'sci-fi & fantasy', 'fantasi'].includes(g))) {
       genreGroups['Sci-Fi & Fantasi'].push(item);
     }
   });
@@ -113,7 +113,7 @@ export default async function Home() {
     other: [],
   };
 
-  validContent.forEach(item => {
+  validContent.forEach((item: any) => {
     platformGroups[item.platform as Platform].push(item);
   });
 

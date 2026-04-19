@@ -48,7 +48,7 @@ export class ScraperService {
     return data?.id;
   }
 
-  private async updateLog(logId: string, status: 'success' | 'failed', summary: any, errorMessage?: string) {
+  private async updateLog(logId: string, status: 'success' | 'failed', summary: ScrapeTaskSummary, errorMessage?: string) {
     try {
       await supabase
         .from('scraper_logs')
@@ -109,7 +109,7 @@ export class ScraperService {
     return data?.value || {};
   }
 
-  private async updateScraperProgress(progress: any) {
+  private async updateScraperProgress(progress: Record<string, number>) {
     await supabase
       .from('settings')
       .upsert({ key: 'scraper_progress', value: progress }, { onConflict: 'key' });
@@ -154,17 +154,18 @@ export class ScraperService {
               .from('episodes')
               .upsert({
                 season_id: dbSeason.id,
-                episode_number: ep.episode_number,
-                title: ep.name,
-                overview: ep.overview,
-                still_path: ep.still_path,
-                air_date: ep.air_date
-              }, { onConflict: 'season_id,episode_number' });
+                  episode_number: ep.episode_number,
+                  title: ep.name,
+                  overview: ep.overview,
+                  still_path: ep.still_path,
+                  air_date: ep.air_date
+                }, { onConflict: 'season_id,episode_number' });
+            }
           }
         }
       }
-    } catch (err) {
-      console.error(`Error scraping TV details for ${tmdbId}:`, err);
+    } catch (err: any) {
+      console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
     }
   }
 
@@ -213,7 +214,7 @@ export class ScraperService {
               // Use Advanced Classification
               const finalType = classifyContentType(metadata, genre.type as any);
               const platform = classifyPlatform(metadata, finalType);
-              const genreNames = metadata.genres?.map((g: any) => g.name) || [];
+              const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
               
               const { data: dbItem, error: upsertError } = await supabase
                 .from('contents')
@@ -444,7 +445,7 @@ export class ScraperService {
     return summary;
   }
 
-  private async addProviderLinks(contentId: string, type: string, tmdbId: number, config: any) {
+  private async addProviderLinks(contentId: string, type: string, tmdbId: number, config: { videospider_enabled?: boolean, superembed_enabled?: boolean }) {
     const isTV = type === 'tv';
     const providers = [];
 

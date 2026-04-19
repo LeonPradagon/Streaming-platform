@@ -155,7 +155,7 @@ export default async function WatchPage({
               </div>
               
               <div className="flex gap-2 mb-6 flex-wrap">
-                {metadata?.genres?.map((g: any) => (
+                {metadata?.genres?.map((g: { id: number; name: string }) => (
                   <span key={g.id} className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/10 transition cursor-default">
                     {g.name}
                   </span>
