@@ -12,7 +12,9 @@ interface MovieCardProps {
 }
 
 export default function MovieCard({ item, progress, isNew }: MovieCardProps) {
-  const getImageUrl = (path: string | undefined | null) => path ? `https://image.tmdb.org/t/p/w500${path}` : null;
+  const getImageUrl = (path: string | undefined | null) => 
+    path ? `https://image.tmdb.org/t/p/w500${path}` : `https://placehold.co/400x600/1a1a1a/ffffff?text=${encodeURIComponent(item.title)}`;
+  
   const year = (item.metadata?.release_date || item.metadata?.first_air_date || '').split('-')[0];
   
   const { isInWatchlist, toggleWatchlist } = useWatchlist();
@@ -55,18 +57,12 @@ export default function MovieCard({ item, progress, isNew }: MovieCardProps) {
       onClick={handleNavigate}
     >
       <div className="relative w-full aspect-[2/3] rounded-md md:rounded-lg overflow-hidden bg-card border border-white/5">
-        {getImageUrl(item.metadata?.poster_path) ? (
-          <img 
-            src={getImageUrl(item.metadata?.poster_path)!} 
-            alt={item.title}
-            className="w-full h-full object-cover text-[10px] text-gray-500"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full bg-card flex items-center justify-center text-gray-600 text-xs font-bold">
-            No Poster
-          </div>
-        )}
+        <img 
+          src={getImageUrl(item.metadata?.poster_path)} 
+          alt={item.title}
+          className="w-full h-full object-cover text-[10px] text-gray-500"
+          loading="lazy"
+        />
         
         {/* Top Badges */}
         <div className="absolute top-2 left-2 flex flex-col gap-1 z-20">

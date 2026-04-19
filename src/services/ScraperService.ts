@@ -336,6 +336,16 @@ export class ScraperService {
   }
 
   /**
+   * Full Daily Routine: Trending + Genre Discovery
+   */
+  public async runFullRoutine(): Promise<ScrapeTaskSummary[]> {
+    console.log('🚀 Starting Full Scraper Routine...');
+    const trending = await this.runTrendingDiscovery();
+    const discovery = await this.runDiscovery(2); // 2 pages per genre
+    return [trending, discovery];
+  }
+
+  /**
    * Health Check Task: Validates if links are active (200 OK)
    */
   public async validateLinks(): Promise<ScrapeTaskSummary> {

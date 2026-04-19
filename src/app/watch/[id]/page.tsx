@@ -115,7 +115,11 @@ export default async function WatchPage({
             {/* Player Container */}
             <div className="w-full aspect-video rounded-xl md:rounded-2xl overflow-hidden shadow-2xl shadow-black/50 border border-white/10 bg-black">
               {activeLink ? (
-                <VideoPlayer src={finalUrl} title={content.title} />
+                <VideoPlayer 
+                  src={finalUrl} 
+                  title={content.title} 
+                  backdrop={getTMDBImageUrl(metadata?.backdrop_path || '', 'original')} 
+                />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-gray-500 relative">
                   <Play size={64} className="opacity-20" />

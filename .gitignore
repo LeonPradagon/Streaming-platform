@@ -22,10 +22,14 @@
 .DS_Store
 *.pem
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 Thumbs.db
 
-# env files (IMPORTANT: never push secrets to GitHub)
+# env files (Sangat Penting: Jangan pernah push rahasia ke GitHub)
 .env
+.env*.local
 .env.local
 .env.development.local
 .env.test.local
@@ -44,9 +48,19 @@ next-env.d.ts
 .idea/
 *.swp
 *.swo
+.project
+.settings
+.classpath
 
-# Project Specific (Local only)
-/scratch/
-GUIDE_SKILLS_ANTIGRAVITY.txt
+# Antigravity / AI Agent Specific
 .agent/
+.gemini/
 CLAUDE.md
+GUIDE_SKILLS_ANTIGRAVITY.txt
+/scratch/
+/docs/superpowers/plans/
+/docs/superpowers/specs/
+
+# Windows specifics
+$RECYCLE.BIN/
+Desktop.ini

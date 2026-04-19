@@ -51,8 +51,8 @@ export async function GET(req: Request) {
   }
 
   const scraper = ScraperService.getInstance();
-  // Fire and forget for Cron
-  scraper.runDiscovery(1).catch(console.error);
+  // Fire and forget for Cron (Vercel will usually wait a bit, but we don't await the whole thing to stay under timeout if possible)
+  scraper.runFullRoutine().catch(console.error);
   
-  return NextResponse.json({ status: 'Scraper triggered in background' });
+  return NextResponse.json({ status: 'Full routine triggered in background' });
 }

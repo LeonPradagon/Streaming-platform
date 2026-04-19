@@ -62,28 +62,42 @@ export default async function Home() {
     }
   });
 
-  // 4. Group by Genre
+  // 4. Group by Genre (Localized & Semantic)
   const genreGroups: Record<string, typeof validContent> = {
-    'Drama': [],
-    'Action & Adventure': [],
-    'Animation': [],
-    'Comedy': [],
-    'Horror': [],
-    'Sci-Fi & Fantasy': [],
+    'Aksi & Petualangan': [],
+    'Drama & Romansa': [],
+    'Horor & Misteri': [],
+    'Komedi': [],
+    'Animasi': [],
+    'Sci-Fi & Fantasi': [],
   };
 
   validContent.forEach(item => {
-    const genres = item.genre_names || item.metadata?.genres?.map((g: any) => g.name) || [];
+    const genres = (item.genre_names || item.metadata?.genres?.map((g: any) => g.name) || []).map((g: string) => g.toLowerCase());
     
-    if (genres.includes('Action') || genres.includes('Action & Adventure') || genres.includes('Adventure')) {
-      genreGroups['Action & Adventure'].push(item);
+    // Aksi & Petualangan
+    if (genres.some(g => ['action', 'adventure', 'war', 'martial arts', 'aksi', 'petualangan'].includes(g))) {
+      genreGroups['Aksi & Petualangan'].push(item);
     }
-    if (genres.includes('Drama')) genreGroups['Drama'].push(item);
-    if (genres.includes('Animation')) genreGroups['Animation'].push(item);
-    if (genres.includes('Comedy')) genreGroups['Comedy'].push(item);
-    if (genres.includes('Horror')) genreGroups['Horror'].push(item);
-    if (genres.includes('Science Fiction') || genres.includes('Fantasy') || genres.includes('Sci-Fi & Fantasy')) {
-      genreGroups['Sci-Fi & Fantasy'].push(item);
+    // Drama & Romansa
+    if (genres.some(g => ['drama', 'romance', 'romansa'].includes(g))) {
+      genreGroups['Drama & Romansa'].push(item);
+    }
+    // Horor & Misteri
+    if (genres.some(g => ['horror', 'thriller', 'mystery', 'misteri', 'horor'].includes(g))) {
+      genreGroups['Horor & Misteri'].push(item);
+    }
+    // Komedi
+    if (genres.some(g => ['comedy', 'family', 'komedi', 'keluarga'].includes(g))) {
+      genreGroups['Komedi'].push(item);
+    }
+    // Animasi
+    if (genres.some(g => ['animation', 'kids', 'anak-anak', 'animasi'].includes(g))) {
+      genreGroups['Animasi'].push(item);
+    }
+    // Sci-Fi & Fantasi
+    if (genres.some(g => ['science fiction', 'fantasy', 'sci-fi & fantasy', 'fantasi'].includes(g))) {
+      genreGroups['Sci-Fi & Fantasi'].push(item);
     }
   });
 
@@ -142,8 +156,8 @@ export default async function Home() {
         )}
 
         {/* Action Genre */}
-        {genreGroups['Action & Adventure'].length > 0 && (
-          <ContentRow title="💥 Action & Adventure" items={genreGroups['Action & Adventure']} />
+        {genreGroups['Aksi & Petualangan'].length > 0 && (
+          <ContentRow title="💥 Aksi & Petualangan" items={genreGroups['Aksi & Petualangan']} />
         )}
 
         {/* Netflix Platform */}
@@ -161,15 +175,15 @@ export default async function Home() {
         )}
 
         {/* Drama Genre */}
-        {genreGroups['Drama'].length > 0 && (
-          <ContentRow title="🎭 Drama Room" items={genreGroups['Drama']} />
+        {genreGroups['Drama & Romansa'].length > 0 && (
+          <ContentRow title="🎭 Drama & Romansa" items={genreGroups['Drama & Romansa']} />
         )}
 
         {/* Anime / Animation */}
-        {(typeGroups.anime.length > 0 || typeGroups.donghua.length > 0) && (
+        {(typeGroups.anime.length > 0 || typeGroups.donghua.length > 0 || genreGroups['Animasi'].length > 0) && (
           <ContentRow 
-            title={typeGroups.anime.length > 0 ? TYPE_LABELS.anime : TYPE_LABELS.donghua} 
-            items={[...typeGroups.anime, ...typeGroups.donghua]} 
+            title={typeGroups.anime.length > 0 ? TYPE_LABELS.anime : "🎨 Animasi Terpopuler"} 
+            items={[...typeGroups.anime, ...typeGroups.donghua, ...genreGroups['Animasi']]} 
             platformColor={PLATFORM_COLORS.anime} 
           />
         )}
@@ -208,13 +222,13 @@ export default async function Home() {
         })}
 
         {/* Horror Genre */}
-        {genreGroups['Horror'].length > 0 && (
-          <ContentRow title="👻 Horror & Thriller" items={genreGroups['Horror']} />
+        {genreGroups['Horor & Misteri'].length > 0 && (
+          <ContentRow title="👻 Horor & Misteri" items={genreGroups['Horor & Misteri']} />
         )}
 
         {/* Sci-Fi */}
-        {genreGroups['Sci-Fi & Fantasy'].length > 0 && (
-          <ContentRow title="🚀 Dunia Sci-Fi & Fantasi" items={genreGroups['Sci-Fi & Fantasy']} />
+        {genreGroups['Sci-Fi & Fantasi'].length > 0 && (
+          <ContentRow title="🚀 Dunia Sci-Fi & Fantasi" items={genreGroups['Sci-Fi & Fantasi']} />
         )}
 
         {/* Empty State */}
