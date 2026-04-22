@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { TMDBMetadata, classifyPlatform, classifyContentType } from '@/lib/tmdb-utils';
+import { SubtitleService } from '@/services/SubtitleService';
 import { config } from 'dotenv';
 import path from 'path';
 
@@ -257,7 +258,16 @@ export class ScraperService {
                 await this.scrapeTVDetails(dbItem.id, item.id);
               }
               
+              // Automatically fetch subtitles
+              await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+              
               summary.items_added++;
+
+              // Report progress
+              if (logId) {
+                const totalEstimated = allTasks.length * pagesPerGenre * 20;
+                await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name);
+              }
             } catch (err: any) {
               summary.items_failed++;
               summary.errors.push(`${item.title || item.id}: ${err.message}`);
@@ -340,6 +350,9 @@ export class ScraperService {
               await this.scrapeTVDetails(dbItem.id, item.id);
             }
             
+            // Automatically fetch subtitles
+            await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
+            
             summary.items_added++;
           } catch (err) {
             summary.items_failed++;
@@ -390,6 +403,10 @@ export class ScraperService {
               last_checked_at: new Date().toISOString()
             }).eq('id', link.content_id);
 
+            if (logId) {
+              const title = Array.isArray(link.contents) ? link.contents[0]?.title : link.contents?.title;
+              await this.updateLogProgress(logId, summary.items_processed, links.length, title || link.url);
+            }
           } catch (err: any) {
             summary.items_failed++;
             // Don't mark as unhealthy immediately on timeout, but log it
@@ -451,6 +468,48 @@ export class ScraperService {
             }
             
             summary.items_added++;
+          } catch (err: any) {
+            summary.items_failed++;
+          }
+        }
+      }
+      if (logId) await this.updateLog(logId, 'success', summary);
+    } catch (err: any) {
+      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+    }
+
+    return summary;
+  }
+
+  /**
+   * Sync Missing Subtitles
+   */
+  public async syncMissingSubtitles(): Promise<ScrapeTaskSummary> {
+    const logId = await this.createLog('Sync Missing Subtitles');
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+
+    try {
+      // Find all movies and TV shows
+      const { data: contents } = await supabase.from('contents').select('*');
+      
+      if (contents) {
+        for (const item of contents) {
+          summary.items_processed++;
+          try {
+            const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
+            
+            if (result.status === 'success') {
+              summary.items_added++;
+            } else if (result.status === 'error') {
+              summary.items_failed++;
+            }
+
+            if (logId) {
+              await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title);
+            }
+
+            // Small delay to prevent rate limit
+            await new Promise(resolve => setTimeout(resolve, 300));
           } catch (err: any) {
             summary.items_failed++;
           }

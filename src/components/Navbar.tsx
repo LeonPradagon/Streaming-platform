@@ -42,7 +42,7 @@ export default function Navbar({ brandName }: { brandName: string }) {
           className={`pointer-events-auto transition-all duration-500 w-full max-w-[1200px] flex items-center justify-between px-4 md:px-6 py-2.5 rounded-full ${
             isScrolled
               ? "bg-[#141414]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.5)] border border-white/10"
-              : "bg-black/60 backdrop-blur-md shadow-lg border border-white/5"
+              : "bg-transparent border-transparent shadow-none"
           }`}
         >
           {/* Logo */}
@@ -161,7 +161,7 @@ export default function Navbar({ brandName }: { brandName: string }) {
 
       {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-xl flex flex-col p-6 animate-fadeIn lg:hidden">
+        <div className="fixed inset-0 z-[60] bg-[#0f0f0f]/95 backdrop-blur-xl flex flex-col p-6 animate-fadeIn lg:hidden">
           <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-full border border-white/10 shadow-sm">
             <Link href="/" className="flex items-center gap-2 pl-2" onClick={() => setIsMobileMenuOpen(false)}>
               <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center shadow-lg shadow-red-500/30">

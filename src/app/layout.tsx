@@ -101,7 +101,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="font-sans antialiased text-gray-100 bg-black min-h-screen">
+      <body className="font-sans antialiased text-gray-100 bg-[#0f0f0f] min-h-screen">
         {isAdminRoute || isAuthRoute ? (
           /* Admin/Auth routes: just render children */
           <>
@@ -118,7 +118,7 @@ export default async function RootLayout({
             <main className="flex-1 w-full overflow-hidden">{children}</main>
 
             {/* Premium Footer (Desktop) */}
-            <footer className="hidden md:block py-12 px-6 md:px-12 border-t border-white/5 bg-black">
+            <footer className="hidden md:block py-12 px-6 md:px-12 border-t border-white/5 bg-[#0f0f0f]">
               <div className="flex flex-col md:flex-row justify-between items-center gap-6">
                 <div className="text-2xl font-black uppercase tracking-tighter">
                   {firstPart}

@@ -12,7 +12,8 @@ import {
   Terminal,
   Clock,
   ExternalLink,
-  XCircle
+  XCircle,
+  Subtitles
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { PLATFORM_COLORS } from '@/lib/tmdb-utils';
@@ -46,10 +47,14 @@ export default function ScraperAdmin() {
       setLogs(data);
       // If the latest log is running, update the progress state
       const latest = data[0];
-      if (latest && latest.status === 'running' && latest.progress) {
-        setProgress(latest.progress);
+      if (latest && latest.status === 'running') {
+        if (latest.progress) setProgress(latest.progress);
+        setActiveTask(latest.task_name);
+        setIsLoading(true);
       } else if (latest && latest.status !== 'running') {
         setProgress(null);
+        setActiveTask(null);
+        setIsLoading(false);
       }
     }
   };
@@ -61,25 +66,32 @@ export default function ScraperAdmin() {
     // Polling health every 30 seconds
     const healthInterval = setInterval(fetchHealth, 30000);
     
+    // Polling logs every 2 seconds if a task is running (fallback for realtime)
+    const logsInterval = setInterval(() => {
+      fetchLogs();
+    }, 2000);
+    
     // Subscribe to real-time updates for scraper_logs
     const channel = supabase
       .channel('scraper-status')
       .on('postgres_changes', { 
-        event: 'UPDATE', 
+        event: '*', 
         schema: 'public', 
         table: 'scraper_logs' 
       }, (payload) => {
         const updatedLog = payload.new as any;
-        if (updatedLog.status === 'running') {
+        if (updatedLog && updatedLog.status === 'running') {
           setProgress(updatedLog.progress);
         } else {
           setProgress(null);
-          fetchLogs(); // Refresh list when done
         }
+        fetchLogs(); // Always refresh list on any change
       })
       .subscribe();
 
     return () => {
+      clearInterval(healthInterval);
+      clearInterval(logsInterval);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -110,6 +122,7 @@ export default function ScraperAdmin() {
       
       if (result.success) {
         adminAlert.success('Tugas Dimulai!', 'Cek progress bar di bawah untuk status real-time.');
+        fetchLogs(); // Immediately refresh to show the new 'running' task in history
       } else {
         adminAlert.error('Gagal!', result.error || 'Terjadi kesalahan.');
         setIsLoading(false);
@@ -137,7 +150,7 @@ export default function ScraperAdmin() {
       </div>
 
       {/* Control Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <ControlCard 
           title="Deep Discovery"
           desc="Cari film baru dengan tracker halaman. Melanjutkan dari scrape terakhir."
@@ -169,6 +182,14 @@ export default function ScraperAdmin() {
           onClick={() => runTask('validate')}
           loading={activeTask === 'validate'}
           color="#10b981"
+        />
+        <ControlCard 
+          title="Sync Subtitles"
+          desc="Unduh otomatis subtitle Indonesia/English untuk semua film di database."
+          icon={<Subtitles size={24} />}
+          onClick={() => runTask('subtitles')}
+          loading={activeTask === 'subtitles'}
+          color="#8b5cf6"
         />
       </div>
 

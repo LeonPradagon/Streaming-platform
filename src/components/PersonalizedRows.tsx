@@ -19,17 +19,13 @@ export default function PersonalizedRows() {
   // Adapt local storage items to the structure expected by MovieCard
   // MovieCard expects: item.id, item.title, item.type, item.metadata.poster_path, etc.
   const adaptItem = (item: any) => ({
-    id: item.id,
-    title: item.title,
-    type: item.type,
+    ...item,
     metadata: {
       poster_path: item.poster_path,
       vote_average: item.vote_average,
       release_date: item.release_date,
       first_air_date: item.first_air_date
     },
-    // We pass down progress if it exists (for history)
-    progress: item.progress,
     // Add dummy metadata so missing parts don't crash
     genre_names: []
   });

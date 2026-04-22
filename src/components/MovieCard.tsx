@@ -16,32 +16,34 @@ export default function MovieCard({ item, isNew, progress, rank }: MovieCardProp
 
   // Format rating (e.g., 8.5)
   const rating = item.vote_average ? item.vote_average.toFixed(1) : null;
-  const isTV = Boolean(item.name);
+  const isTV = item.type ? item.type !== 'movie' : Boolean(item.name);
   const title = item.title || item.name;
   const year = (item.release_date || item.first_air_date || '').split('-')[0];
 
   return (
     <div className="flex flex-col w-full group relative">
-      <Link href={`/watch/${item.id}?type=${isTV ? 'tv' : 'movie'}`} className="block relative w-full aspect-[2/3] rounded-sm overflow-hidden bg-[#1a1a1a] shadow-sm border border-transparent transition-all duration-300 group-hover:border-white/30">
+      <Link href={`/watch/${item.id}?type=${isTV ? 'tv' : 'movie'}`} className="block relative w-full aspect-[2/3] rounded-3xl overflow-hidden bg-[#1a1a1a] shadow-sm border border-transparent transition-all duration-300 group-hover:border-white/30">
         
         {/* Ranked Number */}
-        {rank !== undefined ? (
+        {rank !== undefined && (
           <div className="absolute top-0 left-0.5 z-20 font-black text-3xl md:text-4xl text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] opacity-95 tracking-tighter" style={{ WebkitTextStroke: '1px black' }}>
             {rank}
-          </div>
-        ) : (
-          /* Top Left Box - Type Badge */
-          <div className="absolute top-1 left-1 bg-black/60 backdrop-blur-md text-white text-[7px] md:text-[9px] font-bold px-1.5 py-0.5 rounded-sm z-10 uppercase border border-white/10">
-            {isTV ? 'TV' : 'Movie'}
           </div>
         )}
 
         {/* Hover overlay subtle dark */}
         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
-        {/* Top Right Box - Quality Badge */}
-        <div className="absolute top-1 right-1 bg-green-500/90 text-white text-[7px] md:text-[9px] font-bold px-1.5 py-0.5 rounded-sm z-10 tracking-wider uppercase border border-green-600/30">
-          {isTV ? 'EPS' : 'HD'}
+        {/* Top Right Box - Quality & Season Badges */}
+        <div className="absolute top-1 right-1.5 flex flex-col items-end gap-1 z-10">
+          <div className="text-green-400 text-[8px] md:text-[10px] font-black tracking-widest uppercase drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+            {item.quality || 'HD'}
+          </div>
+          {isTV && item.seasonsCount > 0 && (
+            <div className="bg-[#E50914]/90 text-white px-1 py-[1px] rounded-[3px] text-[8px] md:text-[9px] font-bold tracking-wider drop-shadow-md border border-white/20">
+              S{item.seasonsCount}
+            </div>
+          )}
         </div>
 
         <Image
@@ -49,14 +51,14 @@ export default function MovieCard({ item, isNew, progress, rank }: MovieCardProp
           alt={title || 'Movie Thumbnail'}
           fill
           sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
-          className="object-cover transition-transform duration-300 group-hover:scale-105 lazy-image opacity-90 group-hover:opacity-100"
+          className="object-cover transition-transform duration-300 group-hover:scale-110 lazy-image opacity-90 group-hover:opacity-100"
           loading="lazy"
         />
 
         {/* Bottom Left Box - Rating Badge */}
         {rating && (
-          <div className="absolute bottom-1 left-1 bg-[#F5C518]/95 text-black text-[8px] md:text-[10px] font-black px-1.5 py-0.5 rounded-sm shadow-md z-10 flex items-center gap-0.5">
-            <Star size={9} fill="currentColor" strokeWidth={0.5} className="text-black" />
+          <div className="absolute bottom-1 left-1.5 text-[#F5C518] text-[9px] md:text-[11px] font-black z-10 flex items-center gap-0.5 drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+            <Star size={10} fill="currentColor" strokeWidth={0.5} className="drop-shadow-md" />
             {rating}
           </div>
         )}

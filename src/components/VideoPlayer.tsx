@@ -157,9 +157,8 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
           transition: 'opacity 0.3s ease'
         }}
         allowFullScreen
-        allow="autoplay; encrypted-media; picture-in-picture; web-share"
-        referrerPolicy="no-referrer"
-        {...(src.includes('vidlink') ? {} : { sandbox: "allow-forms allow-scripts allow-pointer-lock allow-same-origin allow-top-navigation-by-user-activation" })}
+        allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen"
+        referrerPolicy="origin"
         onLoad={() => setIsLoading(false)}
       />
     </div>

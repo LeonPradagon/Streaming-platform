@@ -8,7 +8,8 @@ export default async function ReportsAdminPage() {
   const { data: reports, error } = await supabase
     .from('reports')
     .select('*, contents(title, tmdb_id, type)')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   if (error) {
     return <div className="text-red-500 font-bold p-8">Gagal memuat aduan laporan.</div>;

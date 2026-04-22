@@ -13,6 +13,7 @@ export interface TMDBMetadata {
   popularity?: number;
   release_date?: string;
   first_air_date?: string;
+  status?: string;
   genres: { id: number; name: string }[];
   credits?: { cast: { id: number; name: string; character: string; profile_path: string | null }[] };
   networks?: { id: number; name: string; logo_path?: string }[];

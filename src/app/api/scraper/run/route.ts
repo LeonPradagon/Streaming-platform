@@ -21,21 +21,22 @@ export async function POST(req: Request) {
     const scraper = ScraperService.getInstance();
     
     // Run in background (don't await for the UI, but return success that it started)
-    // However, for this demo we'll await to give feedback to the Admin UI
-    let result;
+    // This prevents Vercel/browser timeouts for long-running scraper jobs.
     if (task === 'scrape') {
-      result = await scraper.runDiscovery(pages || 2);
+      scraper.runDiscovery(pages || 2).catch(console.error);
     } else if (task === 'trending') {
-      result = await scraper.runTrendingDiscovery();
+      scraper.runTrendingDiscovery().catch(console.error);
     } else if (task === 'validate') {
-      result = await scraper.validateLinks();
+      scraper.validateLinks().catch(console.error);
     } else if (task === 'sync') {
-      result = await scraper.syncAllMetadata();
+      scraper.syncAllMetadata().catch(console.error);
+    } else if (task === 'subtitles') {
+      scraper.syncMissingSubtitles().catch(console.error);
     } else {
       return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, result });
+    return NextResponse.json({ success: true, message: 'Task started in background' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

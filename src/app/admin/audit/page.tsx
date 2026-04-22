@@ -17,7 +17,8 @@ export default async function AuditPage() {
   const { data: logs } = await supabase
     .from('audit_logs')
     .select('*, profiles(full_name, role)')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>

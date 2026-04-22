@@ -40,6 +40,7 @@ export interface TMDBMetadata {
   popularity?: number;
   release_date?: string;
   first_air_date?: string;
+  status?: string;
   genres: { id: number; name: string }[];
   networks?: { id: number; name: string; logo_path?: string }[];
   production_companies?: { id: number; name: string; logo_path?: string; origin_country?: string }[];
