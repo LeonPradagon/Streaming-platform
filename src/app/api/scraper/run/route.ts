@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { ScraperService } from '@/services/ScraperService';
 import { createClient } from '@/lib/supabase/server';
 
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     // 1. Auth Check (only authenticated admins can trigger manually)

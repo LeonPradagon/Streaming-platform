@@ -1,12 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { TMDBMetadata, classifyPlatform, classifyContentType } from '@/lib/tmdb';
 import { SubtitleService } from '@/services/SubtitleService';
-import { config } from 'dotenv';
-import * as path from 'path';
 
-// Load environment variables for standalone script execution
-config({ path: path.resolve(process.cwd(), '.env.local') });
-config(); // also check .env if exists
+// Load environment variables ONLY for standalone script execution (Node.js)
+if (typeof window === 'undefined' && process.env.NODE_ENV !== 'production' && !process.env.NEXT_RUNTIME) {
+  try {
+    const { config } = require('dotenv');
+    const path = require('path');
+    config({ path: path.resolve(process.cwd(), '.env.local') });
+    config(); 
+  } catch (e) {
+    // Ignore if dotenv/path not available in current runtime
+  }
+}
 
 // Configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
