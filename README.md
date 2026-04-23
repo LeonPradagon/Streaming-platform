@@ -1,36 +1,24 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎬 NETIX - Modern Streaming Platform
 
-## Getting Started
+A high-performance movie and TV show streaming platform built with Next.js 16, Supabase, and automated scraping services.
 
-First, run the development server:
+## 🚀 Fitur Utama
+- **Otomatisasi Konten**: Scraper otomatis untuk film trending dan metadata TMDB.
+- **Sistem Subtitle**: Pencarian dan sinkronisasi subtitle otomatis.
+- **Admin Dashboard**: Panel kontrol lengkap untuk manajemen konten dan monitoring scraper.
+- **Premium UI**: Desain responsif dan mewah menggunakan Tailwind CSS 4 dan Framer Motion.
+- **Health Check**: Validasi link otomatis untuk memastikan link streaming selalu aktif.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 📖 Panduan Struktur Proyek
+Untuk memahami cara kerja setiap folder dan file dalam proyek ini, silakan baca panduan lengkapnya di sini:
+👉 **[STRUCTURE.md](docs/STRUCTURE.md)**
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🛠️ Cara Menjalankan Secara Lokal
+1. Pastikan Anda memiliki Node.js terinstal.
+2. Clone repository ini.
+3. Instal dependencies: `npm install`.
+4. Salin `.env.example` ke `.env.local` dan isi API Key Anda.
+5. Jalankan server pengembangan: `npm run dev`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+*Dikembangkan oleh [Jhansen Wilson].*

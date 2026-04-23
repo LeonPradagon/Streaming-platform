@@ -16,7 +16,7 @@ import {
   Subtitles
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { PLATFORM_COLORS } from '@/lib/tmdb-utils';
+import { PLATFORM_COLORS } from '@/lib/tmdb';
 import { adminAlert } from '@/lib/swal';
 
 export default function ScraperAdmin() {

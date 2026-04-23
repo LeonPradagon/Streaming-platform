@@ -1,9 +1,10 @@
 import { supabase } from '@/lib/supabase';
-import { fetchTMDBMetadata } from '@/lib/tmdb';
+import { fetchTMDBMetadata, getTMDBImageUrl } from '@/lib/tmdb';
 import MovieCard from '@/components/MovieCard';
 import BrowseFilters from '@/components/BrowseFilters';
-import { Search } from 'lucide-react';
+import { Search, Star } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export default async function BrowsePage({
   const q = typeof unresolvedParams?.q === 'string' ? unresolvedParams.q : '';
   const type = typeof unresolvedParams?.type === 'string' ? unresolvedParams.type : 'all';
   const sort = typeof unresolvedParams?.sort === 'string' ? unresolvedParams.sort : 'terbaru';
+  const view = typeof unresolvedParams?.view === 'string' ? unresolvedParams.view : 'grid';
   const page = typeof unresolvedParams?.page === 'string' ? parseInt(unresolvedParams.page) : 1;
   const PAGE_SIZE = 30;
 
@@ -24,7 +26,7 @@ export default async function BrowsePage({
   
   if (type !== 'all') {
     if (type === 'tv') {
-      query = query.in('type', ['tv', 'drakor']);
+      query = query.in('type', ['tv', 'drakor', 'drachin', 'drathai', 'drajep', 'variety', 'donghua']);
     } else if (type === 'anime') {
       query = query.eq('type', 'anime');
     } else {
@@ -34,7 +36,8 @@ export default async function BrowsePage({
 
   // Use ilike for server-side search when possible
   if (q) {
-    query = query.ilike('title', `%${q}%`);
+    const sanitizedQuery = q.replace(/[%_\\]/g, '\\$&');
+    query = query.ilike('title', `%${sanitizedQuery}%`);
   }
   
   // Sort at DB level!
@@ -81,16 +84,52 @@ export default async function BrowsePage({
       </div>
 
       {/* Client-side Filters + Search Bar */}
-      <BrowseFilters currentQ={q} currentType={type} currentSort={sort} />
+      <BrowseFilters currentQ={q} currentType={type} currentSort={sort} currentView={view} />
 
-      {/* Grid Results */}
+      {/* Grid/List Results */}
       {validResults.length > 0 ? (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 mt-8">
-            {validResults.map((item) => (
-              <MovieCard key={item.id} item={item} />
-            ))}
-          </div>
+          {view === 'list' ? (
+            <div className="flex flex-col gap-4 mt-8">
+              {validResults.map((item) => (
+                <Link 
+                  key={item.id} 
+                  href={`/watch/${item.id}?type=${item.type === 'movie' ? 'movie' : 'tv'}`} 
+                  className="flex gap-4 p-4 glass rounded-2xl hover:bg-white/10 transition-all group border border-white/5 hover:border-white/20"
+                >
+                   <div className="relative w-20 md:w-32 aspect-[2/3] rounded-xl overflow-hidden flex-shrink-0 shadow-lg">
+                      <Image 
+                        src={getTMDBImageUrl(item.poster_path, 'w185')} 
+                        alt={item.title}
+                        fill 
+                        className="object-cover group-hover:scale-105 transition-transform duration-500" 
+                      />
+                   </div>
+                   <div className="flex flex-col justify-center py-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="bg-primary/20 text-primary text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider">{item.type}</span>
+                        <span className="text-gray-500 text-xs">•</span>
+                        <span className="text-gray-400 text-xs font-bold">{item.release_date?.split('-')[0]}</span>
+                      </div>
+                      <h3 className="text-white text-lg md:text-xl font-black mb-2 group-hover:text-primary transition-colors">{item.title}</h3>
+                      <p className="text-gray-400 text-sm line-clamp-2 md:line-clamp-3 max-w-2xl leading-relaxed mb-3">{item.overview}</p>
+                      {item.vote_average > 0 && (
+                        <div className="flex items-center gap-1.5 text-yellow-500 font-bold text-sm">
+                           <Star size={14} fill="currentColor" />
+                           <span>{item.vote_average.toFixed(1)}</span>
+                        </div>
+                      )}
+                   </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6 mt-8">
+              {validResults.map((item) => (
+                <MovieCard key={item.id} item={item} />
+              ))}
+            </div>
+          )}
 
           {/* Pagination Controls */}
           {Math.ceil((count || 0) / PAGE_SIZE) > 1 && (

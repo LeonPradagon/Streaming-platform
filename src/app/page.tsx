@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { groupContent } from "@/lib/content-grouping";
 import {
   fetchTMDBMetadata,
   classifyPlatform,
@@ -26,7 +27,8 @@ export default async function Home() {
     .from("contents")
     .select("*, seasons(id)")
     .eq("status", "approved")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
 
   if (dbError || !allContent) {
     return (
@@ -41,126 +43,27 @@ export default async function Home() {
     );
   }
 
-  // 2. Map stored metadata (no more bulk TMDB API calls!)
-  const validContent = allContent.map((item: any) => {
-    // We treat the database row as the source of truth for metadata
-    // This dramatically speeds up page loads and prevents 429 errors
-    return {
-      ...item,
-      metadata: {
-        id: item.tmdb_id,
-        title: item.title,
-        overview: item.overview || item.metadata?.overview || "",
-        poster_path: item.poster_path || item.metadata?.poster_path,
-        backdrop_path: item.backdrop_path || item.metadata?.backdrop_path,
-        vote_average: item.vote_average || item.metadata?.vote_average || 0,
-        popularity: item.popularity || item.metadata?.popularity || 0,
-        release_date:
-          item.release_date ||
-          item.metadata?.release_date ||
-          item.metadata?.first_air_date,
-        genres: (
-          item.genre_names ||
-          item.metadata?.genres?.map((g: any) => g.name) ||
-          []
-        ).map((name: string) => ({ id: 0, name })),
-        credits: { cast: item.cast_data || item.metadata?.credits?.cast || [] },
-      },
-      platform: item.platform || ("other" as Platform),
-      seasonsCount: item.seasons ? item.seasons.length : undefined,
-    };
-  });
+  // 2. Map stored metadata
+  const validContent = allContent.map((item: any) => ({
+    ...item,
+    metadata: {
+      id: item.tmdb_id,
+      title: item.title,
+      overview: item.overview || "",
+      poster_path: item.poster_path,
+      backdrop_path: item.backdrop_path,
+      vote_average: item.vote_average || 0,
+      popularity: item.popularity || 0,
+      release_date: item.release_date,
+      genres: (item.genre_names || []).map((name: string) => ({ id: 0, name })),
+      credits: { cast: item.cast_data || [] },
+    },
+    platform: item.platform || "other",
+    seasonsCount: item.seasons?.length,
+  }));
 
-  // 3. Group by Specialized Type (Drakor, Drachin, etc.)
-  const typeGroups: Record<string, typeof validContent> = {
-    drakor: [],
-    drachin: [],
-    anime: [],
-    donghua: [],
-    variety: [],
-    drathai: [],
-    drajep: [],
-  };
-
-  validContent.forEach((item: any) => {
-    if (typeGroups[item.type]) {
-      typeGroups[item.type].push(item);
-    }
-  });
-
-  // 4. Group by Genre (Localized & Semantic)
-  const genreGroups: Record<string, typeof validContent> = {
-    "Aksi & Petualangan": [],
-    "Drama & Romansa": [],
-    "Horor & Misteri": [],
-    Komedi: [],
-    Animasi: [],
-    "Sci-Fi & Fantasi": [],
-  };
-
-  validContent.forEach((item: any) => {
-    const genres = (
-      item.genre_names ||
-      item.metadata?.genres?.map((g: any) => g.name) ||
-      []
-    ).map((g: string) => g.toLowerCase());
-
-    // Aksi & Petualangan
-    if (
-      genres.some((g: string) =>
-        [
-          "action",
-          "adventure",
-          "war",
-          "martial arts",
-          "aksi",
-          "petualangan",
-        ].includes(g),
-      )
-    ) {
-      genreGroups["Aksi & Petualangan"].push(item);
-    }
-    // Drama & Romansa
-    if (
-      genres.some((g: string) => ["drama", "romance", "romansa"].includes(g))
-    ) {
-      genreGroups["Drama & Romansa"].push(item);
-    }
-    // Horor & Misteri
-    if (
-      genres.some((g: string) =>
-        ["horror", "thriller", "mystery", "misteri", "horor"].includes(g),
-      )
-    ) {
-      genreGroups["Horor & Misteri"].push(item);
-    }
-    // Komedi
-    if (
-      genres.some((g: string) =>
-        ["comedy", "family", "komedi", "keluarga"].includes(g),
-      )
-    ) {
-      genreGroups["Komedi"].push(item);
-    }
-    // Animasi
-    if (
-      genres.some((g: string) =>
-        ["animation", "kids", "anak-anak", "animasi"].includes(g),
-      )
-    ) {
-      genreGroups["Animasi"].push(item);
-    }
-    // Sci-Fi & Fantasi
-    if (
-      genres.some((g: string) =>
-        ["science fiction", "fantasy", "sci-fi & fantasy", "fantasi"].includes(
-          g,
-        ),
-      )
-    ) {
-      genreGroups["Sci-Fi & Fantasi"].push(item);
-    }
-  });
+  // 3. Grouping using utility
+  const { typeGroups, genreGroups } = groupContent(validContent);
 
   // 5. Group by Platform
   const platformGroups: Record<Platform, typeof validContent> = {
@@ -249,6 +152,7 @@ export default async function Home() {
             isNewRow={false}
             isTrendingRow={true}
             icon={<Flame size={22} />}
+            viewAllHref="/browse?sort=terbaru"
           />
         )}
 
@@ -258,6 +162,7 @@ export default async function Home() {
             title={TYPE_LABELS.drakor}
             items={typeGroups.drakor}
             icon={<Tv size={22} />}
+            viewAllHref="/browse?type=tv"
           />
         )}
 
@@ -267,6 +172,7 @@ export default async function Home() {
             title="Popular Movies"
             items={genreGroups["Aksi & Petualangan"]}
             icon={<Clapperboard size={22} />}
+            viewAllHref="/browse?type=movie"
           />
         )}
 
@@ -276,6 +182,7 @@ export default async function Home() {
             title={PLATFORM_LABELS.netflix}
             items={platformGroups.netflix}
             platformColor={PLATFORM_COLORS.netflix}
+            viewAllHref="/browse?type=all"
           />
         )}
 
@@ -317,6 +224,7 @@ export default async function Home() {
               ).values(),
             )}
             platformColor={PLATFORM_COLORS.anime}
+            viewAllHref="/browse?type=anime"
           />
         )}
 
@@ -326,17 +234,18 @@ export default async function Home() {
             title={PLATFORM_LABELS.disney}
             items={platformGroups.disney}
             platformColor={PLATFORM_COLORS.disney}
+            viewAllHref="/browse?type=all"
           />
         )}
 
         {/* Variety Shows */}
         {typeGroups.variety.length > 0 && (
-          <ContentRow title={TYPE_LABELS.variety} items={typeGroups.variety} />
+          <ContentRow title={TYPE_LABELS.variety} items={typeGroups.variety} viewAllHref="/browse?type=variety" />
         )}
 
         {/* Remaining Countries */}
         {typeGroups.drathai.length > 0 && (
-          <ContentRow title={TYPE_LABELS.drathai} items={typeGroups.drathai} />
+          <ContentRow title={TYPE_LABELS.drathai} items={typeGroups.drathai} viewAllHref="/browse?type=drathai" />
         )}
 
         {/* Other Platform Sections */}

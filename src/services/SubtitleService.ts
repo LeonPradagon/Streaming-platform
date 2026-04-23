@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import AdmZip from 'adm-zip';
 import { config } from 'dotenv';
-import path from 'path';
+import * as path from 'path';
 
 config({ path: path.resolve(process.cwd(), '.env.local') });
 config();
@@ -51,6 +51,19 @@ export class SubtitleService {
     return vtt;
   }
 
+  private static async fetchWithTimeout(url: string, options: any = {}, timeout = 15000): Promise<Response> {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return response;
+    } catch (error) {
+      clearTimeout(id);
+      throw error;
+    }
+  }
+
   private static async fetchFromOpenSubtitles(tmdbId: number | string, type: 'movie' | 'tv', season?: string, episode?: string, langCode: string = 'id'): Promise<string> {
     if (!OPENSUBTITLES_API_KEY) throw new Error('OpenSubtitles API key missing');
     
@@ -66,7 +79,7 @@ export class SubtitleService {
       searchParams.set('episode_number', episode);
     }
 
-    const searchRes = await fetch(`${OS_BASE_URL}/subtitles?${searchParams.toString()}`, {
+    const searchRes = await this.fetchWithTimeout(`${OS_BASE_URL}/subtitles?${searchParams.toString()}`, {
       headers: {
         'Api-Key': OPENSUBTITLES_API_KEY,
         'Content-Type': 'application/json',
@@ -84,7 +97,7 @@ export class SubtitleService {
     const fileId = searchData.data[0].attributes?.files?.[0]?.file_id;
     if (!fileId) throw new Error('No subtitle file ID found');
 
-    const downloadRes = await fetch(`${OS_BASE_URL}/download`, {
+    const downloadRes = await this.fetchWithTimeout(`${OS_BASE_URL}/download`, {
       method: 'POST',
       headers: {
         'Api-Key': OPENSUBTITLES_API_KEY,
@@ -100,7 +113,7 @@ export class SubtitleService {
 
     if (!downloadUrl) throw new Error('No dl link received');
 
-    const fileRes = await fetch(downloadUrl);
+    const fileRes = await this.fetchWithTimeout(downloadUrl);
     if (!fileRes.ok) throw new Error('Failed to fetch from OS dl URL');
 
     return await fileRes.text();
@@ -114,7 +127,7 @@ export class SubtitleService {
       subdlUrl += `&season_number=${season}&episode_number=${episode}`;
     }
 
-    const subdlRes = await fetch(subdlUrl);
+    const subdlRes = await this.fetchWithTimeout(subdlUrl);
     if (!subdlRes.ok) throw new Error(`Subdl Search Failed: ${subdlRes.status}`);
 
     const subdlData = await subdlRes.json();
@@ -123,7 +136,7 @@ export class SubtitleService {
     }
 
     const downloadLink = `https://dl.subdl.com${subdlData.subtitles[0].url}`;
-    const zipRes = await fetch(downloadLink);
+    const zipRes = await this.fetchWithTimeout(downloadLink);
     if (!zipRes.ok) throw new Error('Failed to download ZIP from Subdl');
 
     const arrayBuffer = await zipRes.arrayBuffer();

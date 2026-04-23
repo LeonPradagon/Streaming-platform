@@ -36,7 +36,7 @@ export default function WatchActions({ item }: WatchActionsProps) {
       release_date: item.release_date,
       first_air_date: item.first_air_date,
       addedAt: Date.now(),
-      progress: Math.floor(Math.random() * 60) + 20, // simulate random progress 20-80%
+      progress: 0, // start at 0%
     });
   }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

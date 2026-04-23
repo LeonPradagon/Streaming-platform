@@ -59,9 +59,10 @@ export default function Navbar({ brandName }: { brandName: string }) {
           <div className="hidden lg:flex items-center justify-between flex-1">
             <div className="flex items-center gap-1">
               {navLinks.map((link) => {
+                const linkPath = link.path.split('?')[0];
                 const isActive =
-                  pathname === link.path ||
-                  (pathname === "/" && link.path === "/");
+                  pathname === linkPath ||
+                  (pathname === "/" && linkPath === "/");
                 return (
                   <Link
                     key={link.name}

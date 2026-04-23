@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import MaintenanceMode from "@/components/MaintenanceMode";
 import Navbar from "@/components/Navbar";
+import MobileNav from "@/components/MobileNav";
 import ToastContainer from "@/components/Toast";
 import { Analytics } from "@vercel/analytics/react";
 
@@ -50,14 +51,18 @@ export default async function RootLayout({
 
   // Detect if current route is admin or auth page
   const headersList = await headers();
-  const pathname = headersList.get("x-pathname") || "";
+  const pathname = 
+    headersList.get("x-pathname") || 
+    headersList.get("x-invoke-path") || 
+    headersList.get("x-url") || 
+    "";
+  
   const isAdminRoute = pathname.startsWith("/admin");
   const isAuthRoute = pathname === "/login" || pathname === "/register";
 
-  // Fetch Site Config
+  // Fetch all site settings once
   const { data: settingsData } = await supabase.from("settings").select("*");
-  const siteConfig = settingsData?.find((s) => s.key === "site_config")
-    ?.value || {
+  const siteConfig = settingsData?.find((s) => s.key === "site_config")?.value || {
     title: "Antigravity",
     primary_color: "#eab308",
     navbar_color: "#38bdf8",
@@ -65,20 +70,21 @@ export default async function RootLayout({
   };
 
   // Auth Check for Admin
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user?.id)
-    .single();
+  const { data: { user } } = await supabase.auth.getUser();
+  let isAdmin = false;
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    isAdmin = profile?.role === "super_admin";
+  }
 
-  const isAdmin = profile?.role === "super_admin";
   const isMaintenance = siteConfig.maintenance_mode && !isAdmin;
 
   // Split title for dual-tone (Logo)
-  const titleParts = siteConfig.title.split(" ");
+  const titleParts = (siteConfig.title || "Antigravity").split(" ");
   const firstPart = titleParts[0];
   const secondPart = titleParts.slice(1).join(" ");
 
@@ -87,26 +93,23 @@ export default async function RootLayout({
   const navbarColor = siteConfig.navbar_color || "#38bdf8";
 
   return (
-    <html lang="id" suppressHydrationWarning className={inter.variable}>
-      <head>
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `
-          :root {
-            --primary: ${primaryColor};
-            --primary-glow: ${primaryColor}33;
-            --navbar-text: ${navbarColor};
-          }
-        `,
-          }}
-        />
-      </head>
+    <html 
+      lang="id" 
+      suppressHydrationWarning 
+      className={inter.variable}
+      style={{
+        // @ts-ignore
+        '--primary': primaryColor,
+        '--primary-glow': `${primaryColor}33`,
+        '--navbar-text': navbarColor,
+      }}
+    >
+      <head />
       <body className="font-sans antialiased text-gray-100 bg-[#0f0f0f] min-h-screen">
         {isAdminRoute || isAuthRoute ? (
           /* Admin/Auth routes: just render children */
           <>
             {children}
-            <ToastContainer />
           </>
         ) : isMaintenance ? (
           <MaintenanceMode siteTitle={siteConfig.title} />
@@ -154,88 +157,7 @@ export default async function RootLayout({
             </footer>
 
             {/* Mobile Bottom Navigation */}
-            <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass-nav border-t border-white/10 px-6 py-3 flex justify-between items-center pb-safe">
-              <Link
-                href="/"
-                className="flex flex-col items-center gap-1 text-primary"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-                <span className="text-[10px] font-bold">Home</span>
-              </Link>
-              <Link
-                href="/browse"
-                className="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition-colors"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <span className="text-[10px] font-bold">Search</span>
-              </Link>
-              <Link
-                href="/profile?tab=list"
-                className="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition-colors"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="12" x2="12" y1="5" y2="19" />
-                  <line x1="5" x2="19" y1="12" y2="12" />
-                </svg>
-                <span className="text-[10px] font-bold">My List</span>
-              </Link>
-              <Link
-                href="/profile"
-                className="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition-colors"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-                <span className="text-[10px] font-bold">Profile</span>
-              </Link>
-            </div>
+            <MobileNav />
           </div>
         )}
         <ToastContainer />

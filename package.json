@@ -12,6 +12,7 @@
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.2",
     "@vercel/analytics": "^2.0.1",
+    "@vidstack/react": "^0.6.15",
     "adm-zip": "^0.5.17",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
@@ -23,7 +24,8 @@
     "react-dom": "19.2.4",
     "sweetalert2": "^11.26.24",
     "sweetalert2-react-content": "^5.1.2",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "vidstack": "^0.6.15"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

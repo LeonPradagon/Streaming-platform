@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   
   images: {
-    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',
@@ -16,6 +15,12 @@ const nextConfig: NextConfig = {
       {
         protocol: 'https',
         hostname: 'via.placeholder.com',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'oqpubtvugpevpgflrjwv.supabase.co',
         port: '',
         pathname: '/**',
       }

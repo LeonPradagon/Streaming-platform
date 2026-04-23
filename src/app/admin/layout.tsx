@@ -2,19 +2,8 @@ import { logout } from "@/app/auth/actions";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import {
-  BarChart3,
-  Film,
-  Users,
-  History,
-  Settings,
-  LogOut,
-  ExternalLink,
-  Search,
-  CheckCircle2,
-  Activity,
-  AlertTriangle,
-} from "lucide-react";
+import { Search } from "lucide-react";
+import AdminSidebar from "@/components/Admin/Sidebar";
 
 export default async function AdminLayout({
   children,
@@ -49,241 +38,40 @@ export default async function AdminLayout({
   const brandName = siteConfigReq?.value?.title || "OHAYO";
 
   return (
-    <div
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        backgroundColor: "#060d17",
-        color: "#f8fafc",
-      }}
-    >
-      {/* Sidebar */}
-      <aside
-        style={{
-          width: "280px",
-          borderRight: "1px solid rgba(255,255,255,0.05)",
-          padding: "2rem 1.5rem",
-          display: "flex",
-          flexDirection: "column",
-          position: "sticky",
-          top: 0,
-          height: "100vh",
-        }}
-      >
-        {/* Brand */}
-        <div style={{ marginBottom: "3rem", padding: "0 0.5rem" }}>
-          <h2
-            style={{
-              fontSize: "1.5rem",
-              fontWeight: 900,
-              color: "#eab308",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-            }}
-          >
-            {brandName}{" "}
-            <span
-              style={{
-                fontSize: "0.6rem",
-                padding: "0.2rem 0.4rem",
-                backgroundColor: "rgba(234, 179, 8, 0.1)",
-                borderRadius: "4px",
-              }}
-            >
-              ADMIN
-            </span>
-          </h2>
-        </div>
-
-        {/* Navigation */}
-        <nav
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.5rem",
-          }}
-        >
-          <SidebarLink
-            href="/admin"
-            icon={<BarChart3 size={20} />}
-            label="Overview"
-          />
-          <SidebarLink
-            href="/admin/approve"
-            icon={<CheckCircle2 size={20} />}
-            label="Persetujuan Film"
-          />
-          <SidebarLink
-            href="/admin/catalog"
-            icon={<Film size={20} />}
-            label="Katalog Konten"
-          />
-          <SidebarLink
-            href="/admin/users"
-            icon={<Users size={20} />}
-            label="Manajemen User"
-          />
-          <SidebarLink
-            href="/admin/audit"
-            icon={<History size={20} />}
-            label="Log Audit"
-          />
-          <SidebarLink
-            href="/admin/scraper"
-            icon={<Activity size={20} />}
-            label="Scraper Control"
-          />
-          <SidebarLink
-            href="/admin/reports"
-            icon={<AlertTriangle size={20} />}
-            label="Laporan Kendala"
-          />
-          <div
-            style={{
-              margin: "1.5rem 0",
-              height: "1px",
-              backgroundColor: "rgba(255,255,255,0.05)",
-            }}
-          />
-          <SidebarLink
-            href="/admin/settings"
-            icon={<Settings size={20} />}
-            label="Site Settings"
-          />
-          <Link
-            href="/"
-            target="_blank"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              padding: "0.75rem 1rem",
-              color: "#64748b",
-              textDecoration: "none",
-              fontSize: "0.9rem",
-              fontWeight: 600,
-            }}
-          >
-            <ExternalLink size={18} /> Lihat Website
-          </Link>
-        </nav>
-
-        {/* User Info & Logout */}
-        <div
-          className="glass"
-          style={{
-            marginTop: "auto",
-            padding: "1rem",
-            borderRadius: "1rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.75rem",
-          }}
-        >
-          <div
-            style={{
-              width: "40px",
-              height: "40px",
-              backgroundColor: "#eab308",
-              borderRadius: "0.75rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#060d17",
-              fontWeight: 800,
-            }}
-          >
-            {user?.user_metadata.full_name?.charAt(0) || "A"}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: "0.85rem",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {user?.user_metadata.full_name || "Admin"}
-            </div>
-            <div style={{ fontSize: "0.7rem", color: "#64748b" }}>
-              Administrator
-            </div>
-          </div>
-          <form action={logout}>
-            <button
-              type="submit"
-              style={{
-                backgroundColor: "transparent",
-                border: "none",
-                color: "#ef4444",
-                cursor: "pointer",
-                padding: "0.5rem",
-              }}
-            >
-              <LogOut size={18} />
-            </button>
-          </form>
-        </div>
-      </aside>
+    <div className="flex min-h-screen bg-[#060d17] text-[#f8fafc]">
+      <AdminSidebar user={user} brandName={brandName} />
 
       {/* Main Content Area */}
-      <main style={{ flex: 1, padding: "2.5rem 3.5rem", overflowY: "auto" }}>
+      <main className="flex-1 p-6 md:p-10 lg:p-14 overflow-y-auto w-full">
         {/* Action Bar / Header */}
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "3rem",
-          }}
-        >
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
           <div>
-            <h1
-              style={{
-                fontSize: "1.75rem",
-                fontWeight: 900,
-                letterSpacing: "-0.5px",
-              }}
-            >
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight mb-1">
               Admin Dashboard
             </h1>
-            <p style={{ color: "#64748b", fontSize: "0.9rem" }}>
+            <p className="text-zinc-500 font-medium">
               Selamat datang kembali, mari kelola konten hari ini.
             </p>
           </div>
-          <div style={{ display: "flex", gap: "1rem" }}>
-            <div style={{ position: "relative" }}>
+          
+          <div className="flex w-full md:w-auto gap-3">
+            <div className="relative flex-1 md:flex-none">
               <Search
                 size={18}
-                style={{
-                  position: "absolute",
-                  left: "1rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "#475569",
-                }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600"
               />
               <input
                 type="text"
                 placeholder="Cari film atau user..."
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.05)",
-                  padding: "0.6rem 1rem 0.6rem 2.8rem",
-                  borderRadius: "0.75rem",
-                  color: "white",
-                  width: "300px",
-                }}
+                className="w-full md:w-[300px] bg-white/5 border border-white/5 pl-12 pr-4 py-3 rounded-xl focus:outline-none focus:border-[#eab308]/30 transition-all text-sm"
               />
             </div>
           </div>
         </header>
 
-        {children}
+        <div className="relative">
+          {children}
+        </div>
       </main>
     </div>
   );

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Play, Star } from "lucide-react";
+import { Play, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import Image from "next/image";
+import { getTMDBImageUrl } from "@/lib/tmdb";
 
 interface HeroCarouselProps {
   items: any[];
@@ -25,9 +27,12 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
   if (!items || items.length === 0) return null;
 
   const currentItem = items[currentIndex];
-  // prefer backdrop, fallback to poster
-  const getImageUrl = (path: string | undefined | null) =>
-    path ? `https://image.tmdb.org/t/p/original${path}` : null;
+  
+  const backdropUrl = getTMDBImageUrl(
+    currentItem.metadata?.backdrop_path || currentItem.metadata?.poster_path,
+    'original'
+  );
+
   const rating = currentItem.metadata?.vote_average
     ? currentItem.metadata.vote_average.toFixed(1)
     : null;
@@ -35,18 +40,12 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
   return (
     <section className="relative w-full h-[55vh] md:h-[65vh] lg:h-[75vh] flex items-end overflow-hidden bg-[#0f0f0f] pb-6 md:pb-8 ">
       {/* Background Poster */}
-      {getImageUrl(
-        currentItem.metadata?.backdrop_path ||
-          currentItem.metadata?.poster_path,
-      ) && (
-        <img
-          src={
-            getImageUrl(
-              currentItem.metadata?.backdrop_path ||
-                currentItem.metadata?.poster_path,
-            )!
-          }
+      {backdropUrl && (
+        <Image
+          src={backdropUrl}
           alt={currentItem.title}
+          fill
+          priority
           className="absolute inset-0 w-full h-full object-cover object-top opacity-60"
         />
       )}
@@ -108,12 +107,14 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
               <Play size={16} fill="currentColor" /> Watch Now
             </Link>
           </div>
-          {/* Tiny dots indicator typical in sliders */}
+          
+          {/* Indicators */}
           <div className="flex items-center gap-2 mt-6">
             {items.map((_, idx) => (
               <button
                 key={idx}
                 onClick={() => setCurrentIndex(idx)}
+                aria-label={`Go to slide ${idx + 1}`}
                 className={`transition-all duration-300 h-1.5 rounded-full ${
                   idx === currentIndex
                     ? "w-6 bg-[#E50914]"
@@ -122,7 +123,47 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
               />
             ))}
           </div>
+
+          {/* Arrow Controls */}
+          <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity z-30 pointer-events-none">
+            <button 
+              onClick={() => setCurrentIndex(prev => (prev === 0 ? items.length - 1 : prev - 1))}
+              aria-label="Previous slide"
+              className="p-4 rounded-full bg-black/20 backdrop-blur-md border border-white/5 text-white pointer-events-auto hover:bg-[#E50914] transition-colors"
+            >
+              <ChevronLeft size={24} />
+            </button>
+            <button 
+              onClick={() => setCurrentIndex(prev => (prev === items.length - 1 ? 0 : prev + 1))}
+              aria-label="Next slide"
+              className="p-4 rounded-full bg-black/20 backdrop-blur-md border border-white/5 text-white pointer-events-auto hover:bg-[#E50914] transition-colors"
+            >
+              <ChevronRight size={24} />
+            </button>
+          </div>
         </div>
+      </div>
+      {/* Preload Next/Prev Images */}
+      <div className="hidden">
+        {items.map((item, idx) => {
+          // Preload only if it's the next or previous slide relative to current
+          const isNext = idx === (currentIndex + 1) % items.length;
+          const isPrev = idx === (currentIndex - 1 + items.length) % items.length;
+          if (isNext || isPrev) {
+             const preloadUrl = getTMDBImageUrl(
+               item.metadata?.backdrop_path || item.metadata?.poster_path || "",
+               "original"
+             );
+             return (
+               <img 
+                 key={idx} 
+                 src={preloadUrl} 
+                 alt="preload" 
+               />
+             );
+          }
+          return null;
+        })}
       </div>
     </section>
   );

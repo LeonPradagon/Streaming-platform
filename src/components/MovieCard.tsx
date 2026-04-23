@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Star } from 'lucide-react';
+import { getTMDBImageUrl } from '@/lib/tmdb';
 
 interface MovieCardProps {
   item: any;
@@ -10,9 +11,7 @@ interface MovieCardProps {
 }
 
 export default function MovieCard({ item, isNew, progress, rank }: MovieCardProps) {
-  const posterPath = item.poster_path 
-    ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-    : 'https://via.placeholder.com/500x750?text=No+Image';
+  const posterPath = getTMDBImageUrl(item.poster_path, 'w500');
 
   // Format rating (e.g., 8.5)
   const rating = item.vote_average ? item.vote_average.toFixed(1) : null;

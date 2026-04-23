@@ -1,7 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, Play, Subtitles } from 'lucide-react';
+import { Loader2, Play } from 'lucide-react';
+import { MediaPlayer, MediaOutlet, MediaPoster, MediaCommunitySkin, MediaCaptions } from '@vidstack/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import 'vidstack/styles/base.css';
+import 'vidstack/styles/ui/buttons.css';
+import 'vidstack/styles/ui/sliders.css';
+import 'vidstack/styles/ui/tooltips.css';
+import 'vidstack/styles/community-skin/video.css';
 
 interface VideoPlayerProps {
   src: string;
@@ -15,11 +22,47 @@ interface VideoPlayerProps {
 
 export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, season, episode }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [subtitle, setSubtitle] = useState<{ url: string, language: string } | null>(null);
+  const [clicksRemaining, setClicksRemaining] = useState(1);
 
-  // Reset states when src changes
+  // Reload handler
+  const handleReload = useCallback(() => {
+    setIsLoading(true);
+    setHasError(false);
+    setClicksRemaining(1);
+  }, []);
+
+  // Timeout to detect "stuck" loading
+  useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => {
+        setHasError(true);
+      }, 15000); // 15 seconds timeout
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
+
+  // Reset states and fetch subtitles when src or tmdbId changes
   useEffect(() => {
     setIsLoading(true);
-  }, [src]);
+    setHasError(false);
+    
+    if (tmdbId) {
+      const fetchSubtitle = async () => {
+        try {
+          const res = await fetch(`/api/subtitles?tmdb_id=${tmdbId}&type=${mediaType || 'movie'}${season ? `&season=${season}` : ''}${episode ? `&episode=${episode}` : ''}`);
+          const data = await res.json();
+          if (data.url) {
+            setSubtitle({ url: data.url, language: data.language === 'id' ? 'Indonesian' : 'English' });
+          }
+        } catch (err) {
+          console.error('[VideoPlayer] Subtitle fetch failed:', err);
+        }
+      };
+      fetchSubtitle();
+    }
+  }, [src, tmdbId, mediaType, season, episode]);
 
   // Handle progress tracking from iframe postMessage
   useEffect(() => {
@@ -33,9 +76,11 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
 
         if (payload?.type === 'MEDIA_DATA' && payload?.data) {
           const { duration, currentTime } = payload.data;
+          // When we receive media data, we know it's definitely playing
+          setIsLoading(false);
+          
           if (currentTime > 10 && tmdbId) {
             const now = Date.now();
-            // Throttle saves to once every 15 seconds
             if (now - lastSaveTime > 15000) {
               lastSaveTime = now;
               const { createClient } = await import('@/lib/supabase/client');
@@ -56,7 +101,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
           }
         }
       } catch (err) {
-        // Ignore unparseable messages or other errors
+        // Ignore unparseable messages
       }
     };
 
@@ -70,22 +115,26 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       const urlObj = new URL(url);
       
       urlObj.searchParams.set('autoplay', '1');
-      urlObj.searchParams.set('muted', '0');
       
-      // vidlink.pro — inject subtitle via sub_file
+      // Inject Subtitle if available
+      if (subtitle?.url) {
+        urlObj.searchParams.set('sub.id', subtitle.url);
+        urlObj.searchParams.set('sub.label', subtitle.language);
+        urlObj.searchParams.set('sub.id.id', subtitle.url);
+      }
+
+      // vidlink.pro specifics
       if (url.includes('vidlink')) {
-        urlObj.searchParams.set('primaryColor', 'ffffff');
-        urlObj.searchParams.set('secondaryColor', 'a3a3a3');
+        urlObj.searchParams.set('primaryColor', 'E50914');
+        urlObj.searchParams.set('secondaryColor', 'ffffff');
         urlObj.searchParams.set('iconColor', 'ffffff');
-        
-        // Vidlink's JW Player does not support sub_file well. Force default player.
         urlObj.searchParams.delete('player');
       }
 
-      // vidsrc.pm
+      // vidsrc.pm specifics
       if (url.includes('vidsrc')) {
         urlObj.searchParams.set('auto_play', '1');
-        urlObj.searchParams.set('auto_mute', '0');
+        urlObj.searchParams.set('color', 'E50914');
       }
       
       return urlObj.toString();
@@ -95,72 +144,168 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
   };
 
   return (
-    <div className="video-player-container" style={{ 
-      position: 'relative', 
-      width: '100%', 
-      height: '100%',
-      backgroundColor: '#000', 
-      borderRadius: 'inherit', 
-      overflow: 'hidden', 
-    }}>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin-custom {
-          animation: spin 1s linear infinite;
-        }
-        .play-button-pulse {
-          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: .7; transform: scale(1.05); }
-        }
-        @keyframes subtitleHintSlide {
-          0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
-          12% { opacity: 1; transform: translateX(-50%) translateY(0); }
-          85% { opacity: 1; transform: translateX(-50%) translateY(0); }
-          100% { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-        }
-        .subtitle-hint {
-          animation: subtitleHintSlide 6s ease-in-out forwards;
-        }
-      ` }} />
+    <div className="video-player-container relative w-full h-full bg-black rounded-inherit overflow-hidden">
+      <MediaPlayer
+        title={title}
+        src={{ src: getFinalUrl(src), type: 'video/object' }}
+        className="w-full h-full"
+        load="manual"
+      >
+        <MediaOutlet>
+          <iframe 
+            src={getFinalUrl(src)}
+            title={title}
+            className="absolute inset-0 w-full h-full border-none z-10"
+            style={{ 
+              opacity: isLoading ? 0 : 1, 
+              transition: 'opacity 0.5s ease',
+              backgroundColor: '#000'
+            }}
+            allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
+            referrerPolicy="no-referrer-when-downgrade"
+            onLoad={() => {
+              // Reliably disable loader when iframe finishes loading
+              setTimeout(() => setIsLoading(false), 1500);
+            }}
+            allowFullScreen
+          />
+          {backdrop && <MediaPoster src={backdrop} className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" />}
+          {subtitle?.url && (
+            <track
+              src={subtitle.url}
+              label={subtitle.language}
+              srcLang={subtitle.language === 'Indonesian' ? 'id-ID' : 'en-US'}
+              kind="subtitles"
+              default
+            />
+          )}
+        </MediaOutlet>
+        <MediaCaptions className="vds-captions" />
+        <MediaCommunitySkin />
+      </MediaPlayer>
 
+      {/* Loading Overlay */}
       {isLoading && (
-        <div style={{ 
-          position: 'absolute', 
-          top: 0, left: 0, width: '100%', height: '100%', 
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', 
-          zIndex: 10, backgroundColor: '#0F0F0F', gap: '1rem',
-          backgroundImage: backdrop ? `linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0.2)), url(${backdrop})` : 'none',
-          backgroundSize: 'cover', backgroundPosition: 'center'
-        }}>
-          <Loader2 className="animate-spin-custom" size={40} color="#ffffff" />
-          <span style={{ color: '#a3a3a3', fontSize: '0.875rem', fontWeight: 500 }}>
-            Menyiapkan player...
-          </span>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]">
+          <div 
+            className="absolute inset-0 opacity-40 bg-cover bg-center"
+            style={{ backgroundImage: backdrop ? `linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)), url(${backdrop})` : 'none' }}
+          />
+          {!hasError ? (
+            <div className="relative z-10 flex flex-col items-center gap-4">
+              <Loader2 className="animate-spin text-[#E50914]" size={48} />
+              <span className="text-white font-bold tracking-[2px] text-xs uppercase animate-pulse">
+                Menyiapkan Video...
+              </span>
+            </div>
+          ) : (
+            <div className="relative z-10 flex flex-col items-center gap-6 px-8 text-center animate-in zoom-in duration-300">
+              <AlertCircle className="text-zinc-500" size={48} />
+              <div>
+                <p className="text-white font-bold text-lg mb-2">Loading Terasa Lama?</p>
+                <p className="text-zinc-400 text-sm max-w-xs">
+                  Beberapa server mungkin butuh waktu lebih lama. Coba segarkan halaman atau ganti server lain.
+                </p>
+              </div>
+              <button 
+                onClick={() => window.location.reload()}
+                className="bg-white text-black px-8 py-3 rounded-full font-black text-sm hover:scale-105 transition-transform active:scale-95"
+              >
+                SEGARKAN HALAMAN
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      <iframe 
-        src={getFinalUrl(src)}
-        title={title}
-        style={{ 
-          position: 'absolute', 
-          top: 0, left: 0, width: '100%', height: '100%', 
-          border: 'none',
-          opacity: isLoading ? 0 : 1,
-          transition: 'opacity 0.3s ease'
-        }}
-        allowFullScreen
-        allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen"
-        referrerPolicy="origin"
-        onLoad={() => setIsLoading(false)}
-      />
+      {/* Multi-Click Guard: Professional UX with Framer Motion */}
+      <AnimatePresence mode="wait">
+        {!isLoading && clicksRemaining > 0 && (
+          <motion.div 
+            key="click-guard"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setClicksRemaining(prev => prev - 1);
+            }}
+            className="absolute inset-0 z-[100] cursor-pointer bg-black/20 backdrop-blur-[6px] flex flex-col items-center justify-center select-none"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="bg-zinc-900/90 border border-white/10 p-10 rounded-[2.5rem] flex flex-col items-center gap-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative overflow-hidden"
+            >
+              {/* Animated Background Glow */}
+              <div className="absolute -top-24 -left-24 w-48 h-48 bg-[#E50914]/10 blur-[80px] rounded-full pointer-events-none" />
+              <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-[#E50914]/10 blur-[80px] rounded-full pointer-events-none" />
+
+              <div className="relative">
+                <motion.div 
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="w-20 h-20 rounded-full bg-[#E50914] flex items-center justify-center shadow-[0_0_40px_rgba(229,9,20,0.6)]"
+                >
+                  <Play className="text-white fill-white ml-1.5" size={32} />
+                </motion.div>
+              </div>
+
+              <div className="text-center space-y-2 relative z-10">
+                <motion.p 
+                  key={`title-${clicksRemaining}`}
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="text-white font-black text-2xl tracking-tight"
+                >
+                  SIAP MEMUTAR
+                </motion.p>
+                <motion.p 
+                  key={`desc-${clicksRemaining}`}
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="text-zinc-400 text-sm font-semibold tracking-wide uppercase"
+                >
+                  Klik sekali untuk memulai video
+                </motion.p>
+              </div>
+
+              <div className="flex gap-3 mt-2">
+                <div className="h-1.5 w-32 bg-zinc-800 rounded-full overflow-hidden relative">
+                  <motion.div 
+                    initial={false}
+                    animate={{ width: clicksRemaining === 0 ? '100%' : '0%' }}
+                    className="absolute inset-0 bg-[#E50914] shadow-[0_0_10px_#E50914]"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes slideUp {
+          from { transform: translate(-50%, 100%); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        :root {
+          --media-brand: #E50914;
+          --media-focus-ring-color: #E50914;
+        }
+        .vds-player { 
+          --media-brand: #E50914;
+          --media-controls-color: #ffffff;
+        }
+        .vds-captions {
+          --media-captions-font-size: 1.2rem;
+          text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+      `}} />
     </div>
   );
 }

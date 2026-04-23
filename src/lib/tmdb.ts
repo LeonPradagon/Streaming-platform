@@ -86,7 +86,7 @@ export const fetchTMDBTVSeasonDetails = async (tvId: number, seasonNumber: numbe
 /**
  * Get image URL from TMDB path
  */
-export const getTMDBImageUrl = (path: string, size: 'w500' | 'original' = 'w500') => {
+export const getTMDBImageUrl = (path: string, size: 'w185' | 'w342' | 'w500' | 'original' = 'w500') => {
   if (!path) return '/placeholder-poster.png';
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };
@@ -98,34 +98,63 @@ export const getTMDBImageUrl = (path: string, size: 'w500' | 'original' = 'w500'
 export type Platform = 'netflix' | 'disney' | 'amazon' | 'apple' | 'hbo' | 'paramount' | 'anime' | 'other';
 
 // TMDB Network IDs
-const NETFLIX_NETWORKS = [213];
-const DISNEY_NETWORKS = [2739, 3353]; // Disney+, Disney Channel
-const AMAZON_NETWORKS = [1024, 4353]; // Amazon Prime Video, Amazon Studios
-const APPLE_NETWORKS = [2552]; // Apple TV+
-const HBO_NETWORKS = [49, 3186, 2832]; // HBO, HBO Max, Max
-const PARAMOUNT_NETWORKS = [4330, 2076]; // Paramount+, Paramount Network
-const ANIME_NETWORKS = [
-  614, 98, 210, 1112, 269, 174, 100, 
-  // Tokyo MX, TV Tokyo, Fuji TV, Crunchyroll, Funimation, AT-X, Nippon TV
-  1376, 171, 167, 68, 530, 2064, 
-  // Animax, TBS, Bilibili, NHK, NTV, HIDIVE
-];
+// TMDB IDs Constants
+export const TMDB_NETWORKS = {
+  NETFLIX: [213],
+  DISNEY: [2739, 3353],
+  AMAZON: [1024, 4353],
+  APPLE: [2552],
+  HBO: [49, 3186, 2832],
+  PARAMOUNT: [4330, 2076],
+  ANIME: [614, 98, 210, 1112, 269, 174, 100, 1376, 171, 167, 68, 530, 2064]
+};
 
-// TMDB Production Company IDs
-const NETFLIX_COMPANIES = [213534, 157436]; // Netflix, Netflix Animation
-const DISNEY_COMPANIES = [2, 3166, 6125, 420, 16211]; // Walt Disney, Disney+, Walt Disney Animation, Marvel, Pixar
-const AMAZON_COMPANIES = [9353, 20580]; // Amazon Studios, Amazon Prime Video
-const APPLE_COMPANIES = [164461, 138382]; // Apple TV+, Apple Studios
-const HBO_COMPANIES = [3268, 174652, 12, 76043]; // HBO Films, HBO Max, Warner Bros, Warner Bros Discovery
-const PARAMOUNT_COMPANIES = [4, 21]; // Paramount Pictures, Paramount
+export const TMDB_COMPANIES = {
+  NETFLIX: [213534, 157436],
+  DISNEY: [2, 3166, 6125, 420, 16211],
+  AMAZON: [9353, 20580],
+  APPLE: [164461, 138382],
+  HBO: [3268, 174652, 12, 76043],
+  PARAMOUNT: [4, 21]
+};
 
-function matchesIds(ids: number[], targets: number[]): boolean {
-  return ids.some(id => targets.includes(id));
+/**
+ * Enhanced Content Types for Streaming Platforms
+ */
+export type ContentType = 'movie' | 'tv' | 'anime' | 'drakor' | 'drachin' | 'donghua' | 'variety' | 'drathai' | 'drajep';
+
+/**
+ * Classify content into a specific cultural/genre type
+ */
+export function classifyContentType(metadata: TMDBMetadata | null, tmdbType: 'movie' | 'tv'): ContentType {
+  if (!metadata) return tmdbType === 'movie' ? 'movie' : 'tv';
+  
+  if (tmdbType === 'movie') return 'movie';
+
+  const genreIds = (metadata.genres || []).map(g => g.id);
+  const countries = metadata.origin_country || [];
+  const isAnimation = genreIds.includes(16);
+
+  // 1. Anime (JP Animation)
+  if (isAnimation && countries.includes('JP')) return 'anime';
+  
+  // 2. Donghua (CN Animation)
+  if (isAnimation && (countries.includes('CN') || countries.includes('TW'))) return 'donghua';
+
+  // 3. Variety / Reality / Talk
+  if (genreIds.includes(10764) || genreIds.includes(10767) || genreIds.includes(10763)) return 'variety';
+
+  // 4. Cultural Dramas (TV)
+  if (countries.includes('KR')) return 'drakor';
+  if (countries.includes('CN') || countries.includes('TW')) return 'drachin';
+  if (countries.includes('TH')) return 'drathai';
+  if (countries.includes('JP')) return 'drajep';
+
+  return 'tv';
 }
 
 /**
  * Classify a content item into a streaming platform based on TMDB metadata.
- * Uses networks (TV) and production_companies (movies) for classification.
  */
 export function classifyPlatform(metadata: TMDBMetadata | null, contentType: string): Platform {
   if (!metadata) return 'other';
@@ -136,21 +165,19 @@ export function classifyPlatform(metadata: TMDBMetadata | null, contentType: str
   const genreIds = (metadata.genres || []).map(g => g.id);
   const originCountry = metadata.origin_country || [];
 
-  // Check Anime first (Japanese animation)
-  const isJapaneseAnimation = (
-    contentType === 'anime' ||
-    (genreIds.includes(16) && originCountry.includes('JP')) ||
-    matchesIds(networkIds, ANIME_NETWORKS)
-  );
-  if (isJapaneseAnimation) return 'anime';
+  const matches = (targets: number[]) => allIds.some(id => targets.includes(id));
 
-  // Platform matching (order: most specific first)
-  if (matchesIds(allIds, NETFLIX_NETWORKS) || matchesIds(companyIds, NETFLIX_COMPANIES)) return 'netflix';
-  if (matchesIds(allIds, DISNEY_NETWORKS) || matchesIds(companyIds, DISNEY_COMPANIES)) return 'disney';
-  if (matchesIds(allIds, AMAZON_NETWORKS) || matchesIds(companyIds, AMAZON_COMPANIES)) return 'amazon';
-  if (matchesIds(allIds, APPLE_NETWORKS) || matchesIds(companyIds, APPLE_COMPANIES)) return 'apple';
-  if (matchesIds(allIds, HBO_NETWORKS) || matchesIds(companyIds, HBO_COMPANIES)) return 'hbo';
-  if (matchesIds(allIds, PARAMOUNT_NETWORKS) || matchesIds(companyIds, PARAMOUNT_COMPANIES)) return 'paramount';
+  // Anime check
+  if (contentType === 'anime' || (genreIds.includes(16) && originCountry.includes('JP')) || networkIds.some(id => TMDB_NETWORKS.ANIME.includes(id))) {
+    return 'anime';
+  }
+
+  if (matches(TMDB_NETWORKS.NETFLIX) || companyIds.some(id => TMDB_COMPANIES.NETFLIX.includes(id))) return 'netflix';
+  if (matches(TMDB_NETWORKS.DISNEY) || companyIds.some(id => TMDB_COMPANIES.DISNEY.includes(id))) return 'disney';
+  if (matches(TMDB_NETWORKS.AMAZON) || companyIds.some(id => TMDB_COMPANIES.AMAZON.includes(id))) return 'amazon';
+  if (matches(TMDB_NETWORKS.APPLE) || companyIds.some(id => TMDB_COMPANIES.APPLE.includes(id))) return 'apple';
+  if (matches(TMDB_NETWORKS.HBO) || companyIds.some(id => TMDB_COMPANIES.HBO.includes(id))) return 'hbo';
+  if (matches(TMDB_NETWORKS.PARAMOUNT) || companyIds.some(id => TMDB_COMPANIES.PARAMOUNT.includes(id))) return 'paramount';
 
   return 'other';
 }

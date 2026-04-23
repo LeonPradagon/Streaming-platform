@@ -34,28 +34,34 @@ export async function generateMetadata(
   const { id } = await params;
   const { data: content } = await supabase
     .from("contents")
-    .select("title, tmdb_id, type")
+    .select("title, tmdb_id, type, overview, backdrop_path, poster_path")
     .eq("id", id)
     .single();
 
-  if (!content) return { title: "Not Found - NETIX" };
+  // Fetch Site Config for brand name
+  const { data: settingsData } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "site_config")
+    .single();
+  const siteConfig = settingsData?.value || { title: "NETIX" };
 
-  const metadata = await fetchTMDBMetadata(
-    content.tmdb_id,
-    content.type === "movie" ? "movie" : "tv",
-  );
+  if (!content) return { title: `Not Found - ${siteConfig.title}` };
+
+  const siteTitle = siteConfig.title;
+  const overviewSnippet = content.overview 
+    ? (content.overview.length > 150 ? content.overview.substring(0, 150) + "..." : content.overview)
+    : `Nonton streaming ${content.title} sub indo HD gratis di ${siteTitle}.`;
 
   return {
-    title: `${content.title} - Nonton Gratis di NETIX`,
-    description:
-      metadata?.overview ||
-      `Nonton streaming ${content.title} sub indo HD gratis di NETIX.`,
+    title: `${content.title} - Nonton Gratis di ${siteTitle}`,
+    description: overviewSnippet,
     openGraph: {
-      title: `${content.title} - NETIX`,
-      description: metadata?.overview?.substring(0, 150) + "...",
+      title: `${content.title} - ${siteTitle}`,
+      description: overviewSnippet,
       images: [
         getTMDBImageUrl(
-          metadata?.backdrop_path || metadata?.poster_path || "",
+          content.backdrop_path || content.poster_path || "",
           "original",
         ),
       ],

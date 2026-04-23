@@ -71,11 +71,20 @@ export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', request.nextUrl.pathname);
 
-  return NextResponse.next({
+  // Create the final response
+  const finalResponse = NextResponse.next({
     request: {
       headers: requestHeaders,
     },
   });
+
+  // IMPORTANT: Copy over cookies from supabaseResponse to the final response
+  // This ensures that if the Supabase session was refreshed, the new cookies are sent to the browser.
+  supabaseResponse.cookies.getAll().forEach((cookie) => {
+    finalResponse.cookies.set(cookie.name, cookie.value, cookie);
+  });
+
+  return finalResponse;
 }
 
 export const config = {

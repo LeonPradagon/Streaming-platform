@@ -8,6 +8,7 @@ interface BrowseFiltersProps {
   currentQ: string;
   currentType: string;
   currentSort: string;
+  currentView: string;
 }
 
 const TYPES = [
@@ -24,11 +25,11 @@ const SORTS = [
   { value: 'az', label: 'A-Z' },
 ];
 
-export default function BrowseFilters({ currentQ, currentType, currentSort }: BrowseFiltersProps) {
+export default function BrowseFilters({ currentQ, currentType, currentSort, currentView }: BrowseFiltersProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(currentQ);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(currentView as 'grid' | 'list' || 'grid');
 
   const buildUrl = (params: Record<string, string>) => {
     const searchParams = new URLSearchParams();
@@ -36,10 +37,11 @@ export default function BrowseFilters({ currentQ, currentType, currentSort }: Br
       q: currentQ,
       type: currentType,
       sort: currentSort,
+      view: currentView,
       ...params,
     };
     Object.entries(allParams).forEach(([key, value]) => {
-      if (value && value !== 'all' && value !== 'terbaru' && value !== '') {
+      if (value && value !== 'all' && value !== 'terbaru' && value !== '' && value !== 'grid') {
         searchParams.set(key, value);
       }
     });
@@ -94,13 +96,13 @@ export default function BrowseFilters({ currentQ, currentType, currentSort }: Br
         {/* View Toggle */}
         <div className="flex bg-black/40 border border-white/20 rounded-full p-1">
           <button 
-            onClick={() => setViewMode('grid')}
+            onClick={() => router.push(buildUrl({ view: 'grid' }))}
             className={`p-1.5 rounded-full transition ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
           >
             <Grid size={16} />
           </button>
           <button 
-            onClick={() => setViewMode('list')}
+            onClick={() => router.push(buildUrl({ view: 'list' }))}
             className={`p-1.5 rounded-full transition ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
           >
             <ListIcon size={16} />

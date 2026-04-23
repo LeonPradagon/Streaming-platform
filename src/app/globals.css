@@ -107,3 +107,32 @@
 .skeleton {
   animation: skeleton-loading 1.5s infinite linear;
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .7; transform: scale(1.05); }
+}
+
+.animate-spin-custom {
+  animation: spin 1s linear infinite;
+}
+
+.play-button-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes subtitleHintSlide {
+  0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  12% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+}
+
+.subtitle-hint {
+  animation: subtitleHintSlide 6s ease-in-out forwards;
+}

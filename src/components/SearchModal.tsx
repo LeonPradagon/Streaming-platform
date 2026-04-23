@@ -5,12 +5,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Loader2, Play } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { getTMDBImageUrl } from '@/lib/tmdb';
 import Link from 'next/link';
+import Image from 'next/image';
 
 interface SearchModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const supabase = createClient();
 
 export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
   const [query, setQuery] = useState('');
@@ -18,7 +22,6 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClient();
 
   useEffect(() => {
     if (isOpen) {
@@ -48,11 +51,15 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
       }
       
       setLoading(true);
+      
+      // Sanitize query to prevent LIKE wildcard abuse
+      const sanitizedQuery = query.replace(/[%_\\]/g, '\\$&');
+      
       const { data } = await supabase
         .from('contents')
         .select('*')
         .eq('status', 'approved')
-        .ilike('title', `%${query}%`)
+        .ilike('title', `%${sanitizedQuery}%`)
         .order('created_at', { ascending: false })
         .limit(8);
         
@@ -74,9 +81,6 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
       onClose();
     }
   };
-
-  const getImageUrl = (path: string | undefined | null) => 
-    path ? `https://image.tmdb.org/t/p/w500${path}` : `https://placehold.co/400x600/1a1a1a/ffffff?text=No+Image`;
 
   return (
     <AnimatePresence>
@@ -130,11 +134,14 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
                     className="group"
                   >
                     <Link href={`/watch/${item.id}`} onClick={onClose} className="block relative aspect-[2/3] rounded-xl overflow-hidden shadow-lg border border-white/5 group-hover:border-primary/50 transition-colors">
-                      <img 
-                        src={getImageUrl(item.poster_path || item.metadata?.poster_path)} 
-                        alt={item.title} 
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
+                      <div className="relative w-full h-full">
+                        <Image 
+                          src={getTMDBImageUrl(item.poster_path || item.metadata?.poster_path, 'w500')} 
+                          alt={item.title}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-500"
+                        />
+                      </div>
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-300">
                         <div className="bg-primary text-white p-3 rounded-full scale-50 group-hover:scale-100 transition-transform duration-300">
                           <Play fill="currentColor" />

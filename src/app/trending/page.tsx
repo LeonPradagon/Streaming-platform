@@ -29,12 +29,20 @@ export default async function TrendingPage() {
     }));
   }
 
+  // Fetch Site Config for brand name
+  const { data: settingsData } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "site_config")
+    .single();
+  const siteConfig = settingsData?.value || { title: "Netix" };
+
   return (
     <div className="min-h-screen pt-28 px-4 md:px-12 lg:px-20 animate-fade-in relative z-10 pb-20">
       <div className="flex flex-col justify-between items-start gap-4 mb-10">
         <h1 className="text-3xl md:text-5xl font-black text-white mb-2 flex items-center gap-3">
           <Flame size={40} className="text-red-500" fill="currentColor" />
-          Trending di Netix
+          Trending di {siteConfig.title}
         </h1>
         <p className="text-gray-400 font-semibold text-lg max-w-2xl">
           Sesuai dengan data tren TMDB global terbaru. Ini adalah film dan serial paling populer yang saat ini banyak ditonton di seluruh dunia dan tersedia di platform ini.
