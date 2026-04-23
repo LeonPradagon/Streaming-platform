@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, Play } from 'lucide-react';
+import { Loader2, Play, AlertCircle } from 'lucide-react';
 import { MediaPlayer, MediaOutlet, MediaPoster, MediaCommunitySkin, MediaCaptions } from '@vidstack/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'vidstack/styles/base.css';
