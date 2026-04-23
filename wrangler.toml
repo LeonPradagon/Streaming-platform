@@ -1,7 +1,7 @@
 name = "netix-streaming"
+pages_build_output_dir = ".vercel/output/static"
 compatibility_date = "2024-04-03"
 compatibility_flags = ["nextjs_compute"]
 
 [vars]
-# Variabel environment bisa ditambahkan di sini atau di dashboard
 NODE_VERSION = "20"
