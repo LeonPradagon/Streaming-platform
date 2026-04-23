@@ -1,0 +1,19 @@
+name: Automated Content Scraper
+
+on:
+  schedule:
+    # Runs at 19:00 UTC (02:00 AM WIB) every day
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Scraper API
+        run: |
+          # Ganti URL di bawah dengan URL produksi Netlify Anda jika sudah ada
+          # Disarankan menggunakan GitHub Secrets (Settings > Secrets and variables > Actions)
+          # Buat secret baru: SITE_URL (misal: web-saya.netlify.app) dan SCRAPER_SECRET
+          curl -X GET "https://${{ secrets.SITE_URL || 'ganti-dengan-domain-anda.netlify.app' }}/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}"

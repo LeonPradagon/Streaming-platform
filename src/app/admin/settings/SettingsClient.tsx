@@ -51,11 +51,17 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
       const videospider = formData.get('videospider') === 'on';
       const superembed = formData.get('superembed') === 'on';
       const autoApprove = formData.get('auto_approve') === 'on';
+      const autoScrape = formData.get('auto_scrape') === 'on';
+      const scraperSecret = formData.get('scraper_secret') as string;
+      const discoveryPages = parseInt(formData.get('discovery_pages') as string) || 3;
 
       const result = await updateSettings('scraper_config', { 
         videospider_enabled: videospider, 
         superembed_enabled: superembed, 
-        auto_approve: autoApprove 
+        auto_approve: autoApprove,
+        auto_scrape_enabled: autoScrape,
+        scraper_secret: scraperSecret,
+        discovery_pages: discoveryPages
       });
 
       if (result.success) {
@@ -193,6 +199,51 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
                   <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Secara otomatis menyetujui konten hasil scraping.</div>
                 </div>
                 <input type="checkbox" name="auto_approve" defaultChecked={initialScraperConfig.auto_approve} />
+              </div>
+
+              {/* Automation Section */}
+              <div style={{ padding: '1.5rem', backgroundColor: 'rgba(139, 92, 246, 0.05)', borderRadius: '1rem', border: '1px solid rgba(139, 92, 246, 0.2)', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                   <RefreshCw size={18} color="#a78bfa" className={initialScraperConfig.auto_scrape_enabled ? 'animate-spin-slow' : ''} />
+                   <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#a78bfa' }}>Otomatisasi Scraper</div>
+                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Jalankan rutin scraping tanpa intervensi manual.</div>
+                   </div>
+                   <input type="checkbox" name="auto_scrape" defaultChecked={initialScraperConfig.auto_scrape_enabled} />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '1rem' }}>
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>Scraper Secret Key</label>
+                      <input 
+                        name="scraper_secret"
+                        type="password"
+                        placeholder="Masukkan kode rahasia..."
+                        defaultValue={initialScraperConfig.scraper_secret}
+                        style={{ padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.5rem', color: 'white', fontSize: '0.85rem' }} 
+                      />
+                   </div>
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>Halaman</label>
+                      <input 
+                        name="discovery_pages"
+                        type="number"
+                        min="1"
+                        max="20"
+                        defaultValue={initialScraperConfig.discovery_pages || 3}
+                        style={{ padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.5rem', color: 'white', fontSize: '0.85rem' }} 
+                      />
+                   </div>
+                </div>
+
+                {initialScraperConfig.auto_scrape_enabled && (
+                  <div style={{ padding: '0.75rem', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '0.75rem', border: '1px dashed rgba(139, 92, 246, 0.3)' }}>
+                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#a78bfa', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cron Trigger URL</div>
+                    <code style={{ fontSize: '0.7rem', color: '#cbd5e1', wordBreak: 'break-all', opacity: 0.8 }}>
+                      {typeof window !== 'undefined' ? `${window.location.origin}/api/scraper/run?secret=${initialScraperConfig.scraper_secret || 'KODE_ANDA'}` : 'Loading...'}
+                    </code>
+                  </div>
+                )}
               </div>
 
               <button type="submit" disabled={isPending} style={{ 

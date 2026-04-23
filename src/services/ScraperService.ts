@@ -160,7 +160,10 @@ export class ScraperService {
     return data?.value || {
       auto_approve: false,
       videospider_enabled: true,
-      superembed_enabled: true
+      superembed_enabled: true,
+      auto_scrape_enabled: false,
+      scraper_secret: '',
+      discovery_pages: 3
     };
   }
 
@@ -475,10 +478,10 @@ export class ScraperService {
   /**
    * Full Daily Routine: Trending + Genre Discovery
    */
-  public async runFullRoutine(): Promise<ScrapeTaskSummary[]> {
-    console.log('🚀 Starting Full Scraper Routine...');
+  public async runFullRoutine(pages: number = 5): Promise<ScrapeTaskSummary[]> {
+    console.log(`🚀 Starting Full Scraper Routine (Intensity: ${pages} pages)...`);
     const trending = await this.runTrendingDiscovery();
-    const discovery = await this.runDiscovery(5);
+    const discovery = await this.runDiscovery(pages);
     return [trending, discovery];
   }
 

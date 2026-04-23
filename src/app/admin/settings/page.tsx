@@ -46,7 +46,10 @@ export default async function SettingsPage() {
   const scraperConfig = scraperData?.value || {
     videospider_enabled: true,
     superembed_enabled: true,
-    auto_approve: false
+    auto_approve: false,
+    auto_scrape_enabled: false,
+    scraper_secret: '',
+    discovery_pages: 3
   };
 
   return (

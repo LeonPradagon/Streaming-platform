@@ -16,6 +16,7 @@
   
   --animate-fade-in: fadeIn 0.5s ease-out forwards;
   --animate-skeleton: skeleton-loading 1.5s infinite;
+  --animate-spin-slow: spin 8s linear infinite;
 }
 
 @layer base {
@@ -120,6 +121,10 @@
 
 .animate-spin-custom {
   animation: spin 1s linear infinite;
+}
+
+.animate-spin-slow {
+  animation: spin 8s linear infinite;
 }
 
 .play-button-pulse {
