@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { SubtitleService } from '@/services/SubtitleService';
 
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
 // Rate Limit Map
 const rateLimitMap = new Map<string, { count: number, resetAt: number }>();
 

@@ -1,14 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Load environment variables ONLY for standalone script execution (Node.js)
-if (typeof window === 'undefined' && process.env.NODE_ENV !== 'production' && !process.env.NEXT_RUNTIME) {
-  try {
-    const { config } = require('dotenv');
-    const path = require('path');
-    config({ path: path.resolve(process.cwd(), '.env.local') });
-    config(); 
-  } catch (e) {}
-}
+// Configuration
 
 const OPENSUBTITLES_API_KEY = process.env.OPENSUBTITLES_API_KEY;
 const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
