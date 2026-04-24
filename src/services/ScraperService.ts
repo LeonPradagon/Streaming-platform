@@ -9,7 +9,6 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const tmdbApiKey = process.env.TMDB_API_KEY!;
 
 // Use service_role key if available (bypasses RLS for backend operations)
-// Falls back to anon key if not set (may fail writes with strict RLS)
 if (!supabaseServiceKey) {
   console.warn('[ScraperService] SUPABASE_SERVICE_ROLE_KEY not set. Using anon key - writes may be blocked by RLS.');
 }
@@ -28,6 +27,25 @@ export class ScraperService {
   
   private async delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Helper to run tasks in parallel with a concurrency limit
+   */
+  private async pMap<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
+    const results: R[] = [];
+    const chunks = [];
+    for (let i = 0; i < items.length; i += concurrency) {
+      chunks.push(items.slice(i, i + concurrency));
+    }
+
+    for (const chunk of chunks) {
+      const chunkResults = await Promise.all(chunk.map(item => mapper(item)));
+      results.push(...chunkResults);
+      // Small breathing room between chunks
+      await this.delay(200);
+    }
+    return results;
   }
 
   private async fetchWithTimeout(url: string, options: any = {}, timeout = 15000, retryCount = 0): Promise<Response> {
@@ -63,10 +81,10 @@ export class ScraperService {
   }
 
   /**
-   * Cleanup tasks that have been 'running' for more than 30 minutes
+   * Cleanup tasks that have been 'running' for more than 10 minutes
    */
   private async cleanupStaleTasks() {
-    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
     const { error } = await supabase
       .from('scraper_logs')
@@ -75,7 +93,7 @@ export class ScraperService {
         error_message: 'Task timed out (stale task auto-cleanup)' 
       })
       .eq('status', 'running')
-      .lt('created_at', thirtyMinutesAgo);
+      .lt('created_at', tenMinutesAgo);
 
     if (error) console.error('[Scraper] Error cleaning up stale tasks:', error.message);
     
@@ -229,9 +247,11 @@ export class ScraperService {
               .eq('episode_number', ep.episode_number)
               .single();
 
-            if (existingEp) continue;
+            if (existingEp) {
+              continue;
+            }
 
-            await supabase
+            const { data: newEp } = await supabase
               .from('episodes')
               .upsert({
                 season_id: dbSeason.id,
@@ -240,10 +260,21 @@ export class ScraperService {
                 overview: ep.overview,
                 still_path: ep.still_path,
                 air_date: ep.air_date
-              }, { onConflict: 'season_id,episode_number' });
+              }, { onConflict: 'season_id,episode_number' })
+              .select().single();
+
+            if (newEp) {
+              console.log(`[Scraper] Fetching subtitles for S${seasonItem.season_number}E${ep.episode_number}`);
+              await SubtitleService.fetchAndUploadSubtitle(
+                tmdbId, 
+                'tv', 
+                String(seasonItem.season_number), 
+                String(ep.episode_number)
+              ).catch(e => console.error(`[Scraper] Subtitle failed for S${seasonItem.season_number}E${ep.episode_number}:`, e.message));
+            }
           }
         }
-        await this.delay(300); // Delay between seasons
+        await this.delay(500); // Delay between seasons
       }
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
@@ -259,125 +290,17 @@ export class ScraperService {
     if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
     
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    const scraperConfig = await this.getScraperConfig();
-    const progress = await this.getScraperProgress();
+    
+    // Internal Safety Timeout (9 minutes) to prevent getting stuck if platform kills process
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Internal Scraper Timeout (9 mins reached)')), 9 * 60 * 1000)
+    );
 
     try {
-      // Fetch all genres from TMDB
-      const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
-      const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
-      
-      const { genres: movieGenres } = await movieGenreRes.json();
-      const { genres: tvGenres } = await tvGenreRes.json();
-
-      if (!movieGenres || !tvGenres) {
-         throw new Error("Failed to fetch genres from TMDB - API limit or invalid key");
-      }
-
-      const allTasks = [
-        ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
-        ...tvGenres.map((g: any) => ({ ...g, type: 'tv' }))
-      ];
-
-      for (const genre of allTasks) {
-        const key = `${genre.type}_${genre.id}`;
-        const startPage = progress[key] || 1;
-        const endPage = startPage + pagesPerGenre - 1;
-
-        console.log(`🔍 Scraping Genre: ${genre.name} (${genre.type}) | Pages ${startPage}-${endPage}`);
-
-        for (let page = startPage; page <= endPage; page++) {
-          const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${page}`;
-          const res = await this.fetchWithTimeout(url);
-          const data = await res.json();
-          
-          await this.delay(400); // Increased rate limiting delay
-
-          if (!data.results || data.results.length === 0) break;
-
-          let batchCount = 0;
-          for (const item of data.results) {
-            summary.items_processed++;
-            batchCount++;
-
-            // Smart Skip: Check if already exists
-            const { data: existing } = await supabase
-              .from('contents')
-              .select('id, status')
-              .eq('tmdb_id', item.id)
-              .single();
-
-            // Only skip entirely if it's a MOVIE. 
-            // For TV Series, we still want to check for new episodes.
-            if (existing && taskName === 'Deep Discovery Scrape' && genre.type === 'movie') {
-              continue;
-            }
-
-            try {
-              const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-              if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
-              const metadata: any = await resMetadata.json();
-              
-              await this.delay(300);
-              
-              const finalType = classifyContentType(metadata, genre.type as any);
-              const platform = classifyPlatform(metadata, finalType);
-              const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
-              
-              const { data: dbItem, error: upsertError } = await supabase
-                .from('contents')
-                .upsert({
-                  tmdb_id: item.id,
-                  title: item.title || item.name,
-                  type: finalType,
-                  // Only set status to pending/config-value if it's a NEW item
-                  ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
-                  platform,
-                  cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-                  genre_names: genreNames,
-                  overview: metadata.overview,
-                  poster_path: metadata.poster_path,
-                  backdrop_path: metadata.backdrop_path,
-                  vote_average: metadata.vote_average,
-                  popularity: item.popularity || metadata.popularity || 0,
-                  release_date: metadata.release_date || metadata.first_air_date,
-                  is_healthy: true
-                }, { onConflict: 'tmdb_id' })
-                .select().single();
-
-              if (upsertError) throw upsertError;
-              
-              await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
-              
-              if (genre.type === 'tv') {
-                await this.scrapeTVDetails(dbItem.id, item.id);
-              }
-              
-              await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
-              
-              summary.items_added++;
-
-              if (logId) {
-                const totalEstimated = allTasks.length * pagesPerGenre * 20;
-                await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name);
-              }
-
-              // Batch Breathing: extra pause every 30 items
-              if (batchCount % 30 === 0) {
-                console.log('[Scraper] Batch limit reached. Breathing for 3s...');
-                await this.delay(3000);
-              }
-            } catch (err: any) {
-              summary.items_failed++;
-              const errorType = err.message.includes('TMDB') ? '[TMDB]' : err.message.includes('supabase') ? '[DB]' : '[SCRAPE]';
-              summary.errors.push(`${errorType} ${item.title || item.id}: ${err.message}`);
-              console.error(`[Scraper] Failed item ${item.id}:`, err.message);
-            }
-          }
-          progress[key] = page + 1;
-          await this.updateScraperProgress(progress);
-        }
-      }
+      await Promise.race([
+        this.executeDiscovery(pagesPerGenre, logId, summary),
+        timeoutPromise
+      ]);
       
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
@@ -386,6 +309,113 @@ export class ScraperService {
     }
 
     return summary;
+  }
+
+  private async executeDiscovery(pagesPerGenre: number, logId: string, summary: ScrapeTaskSummary) {
+    const scraperConfig = await this.getScraperConfig();
+    const progress = await this.getScraperProgress();
+    
+    // Fetch all genres from TMDB
+    const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
+    const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
+    
+    const { genres: movieGenres } = await movieGenreRes.json();
+    const { genres: tvGenres } = await tvGenreRes.json();
+
+    if (!movieGenres || !tvGenres) {
+       throw new Error("Failed to fetch genres from TMDB - API limit or invalid key");
+    }
+
+    const allTasks = [
+      ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
+      ...tvGenres.map((g: any) => ({ ...g, type: 'tv' }))
+    ];
+
+    for (const genre of allTasks) {
+      const key = `${genre.type}_${genre.id}`;
+      const startPage = progress[key] || 1;
+      const endPage = startPage + pagesPerGenre - 1;
+
+      console.log(`🔍 Scraping Genre: ${genre.name} (${genre.type}) | Pages ${startPage}-${endPage}`);
+
+      for (let page = startPage; page <= endPage; page++) {
+        const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${page}`;
+        const res = await this.fetchWithTimeout(url);
+        const data = await res.json();
+        
+        await this.delay(400);
+
+        if (!data.results || data.results.length === 0) break;
+
+        await this.pMap(data.results, async (item: any) => {
+          summary.items_processed++;
+          const { data: existing } = await supabase
+            .from('contents')
+            .select('id, status, last_air_date')
+            .eq('tmdb_id', item.id)
+            .single();
+
+          if (existing && genre.type === 'movie') return;
+
+          try {
+            const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+            if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
+            const metadata: any = await resMetadata.json();
+            
+            const finalType = classifyContentType(metadata, genre.type as any);
+            const platform = classifyPlatform(metadata, finalType);
+            const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
+            
+            const { data: dbItem, error: upsertError } = await supabase
+              .from('contents')
+              .upsert({
+                tmdb_id: item.id,
+                title: item.title || item.name,
+                type: finalType,
+                ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
+                platform,
+                cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+                genre_names: genreNames,
+                overview: metadata.overview,
+                poster_path: metadata.poster_path,
+                backdrop_path: metadata.backdrop_path,
+                vote_average: metadata.vote_average,
+                popularity: item.popularity || metadata.popularity || 0,
+                release_date: metadata.release_date || metadata.first_air_date,
+                last_air_date: metadata.last_air_date || null,
+                is_healthy: true
+              }, { onConflict: 'tmdb_id' })
+              .select().single();
+
+            if (upsertError) throw upsertError;
+            
+            await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
+            
+            if (genre.type === 'tv') {
+              const shouldScrapeDetails = !existing || (metadata.last_air_date && existing.last_air_date !== metadata.last_air_date);
+              if (shouldScrapeDetails) {
+                await this.scrapeTVDetails(dbItem.id, item.id);
+              }
+            }
+            
+            await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+            
+            summary.items_added++;
+
+            if (logId) {
+              const totalEstimated = allTasks.length * pagesPerGenre * 20;
+              await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name);
+            }
+          } catch (err: any) {
+            summary.items_failed++;
+            summary.errors.push(`${item.title || item.id}: ${err.message}`);
+          }
+        }, 3);
+
+        progress[key] = page + 1;
+        await this.updateScraperProgress(progress);
+      }
+    }
   }
 
   /**
@@ -397,82 +427,95 @@ export class ScraperService {
     if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
 
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    const scraperConfig = await this.getScraperConfig();
+    
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Internal Trending Timeout (9 mins reached)')), 9 * 60 * 1000)
+    );
 
     try {
-      const url = `https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`;
-      const res = await this.fetchWithTimeout(url);
-      const data = await res.json();
-
-      if (data.results) {
-        for (const item of data.results) {
-          if (item.media_type !== 'movie' && item.media_type !== 'tv') continue;
-          
-          summary.items_processed++;
-          try {
-            // Check if already exists to protect status
-            const { data: existing } = await supabase
-              .from('contents')
-              .select('id, status')
-              .eq('tmdb_id', item.id)
-              .single();
-
-            const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-            if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
-            const metadata: TMDBMetadata = await resMetadata.json();
-            
-            const finalType = classifyContentType(metadata, item.media_type as any);
-            const platform = classifyPlatform(metadata, finalType);
-            const genreNames = metadata.genres?.map(g => g.name) || [];
-
-            const { data: dbItem, error: upsertError } = await supabase
-              .from('contents')
-              .upsert({
-                tmdb_id: item.id,
-                title: item.title || item.name,
-                type: finalType,
-                // Only set status if NEW item
-                ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
-                platform,
-                cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-                genre_names: genreNames,
-                overview: metadata.overview,
-                poster_path: metadata.poster_path,
-                backdrop_path: metadata.backdrop_path,
-                vote_average: metadata.vote_average,
-                popularity: item.popularity || metadata.popularity || 0,
-                release_date: metadata.release_date || metadata.first_air_date,
-                is_healthy: true
-              }, { onConflict: 'tmdb_id' })
-              .select().single();
-
-            if (upsertError) throw upsertError;
-
-            if (logId) {
-              await this.updateLogProgress(logId, summary.items_processed, data.results.length, item.title || item.name);
-            }
-            
-            await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
-            
-            if (item.media_type === 'tv') {
-              await this.scrapeTVDetails(dbItem.id, item.id);
-            }
-            
-            await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
-            
-            summary.items_added++;
-            await this.delay(300);
-          } catch (err: any) {
-            summary.items_failed++;
-            console.error(`[Scraper] Trending failed for ${item.id}:`, err.message);
-          }
-        }
-      }
+      await Promise.race([
+        this.executeTrending(logId, summary),
+        timeoutPromise
+      ]);
+      
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
+      console.error("Trending error:", err);
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
     return summary;
+  }
+
+  private async executeTrending(logId: string, summary: ScrapeTaskSummary) {
+    const scraperConfig = await this.getScraperConfig();
+    const url = `https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`;
+    const res = await this.fetchWithTimeout(url);
+    const data = await res.json();
+
+    if (data.results) {
+      await this.pMap(data.results, async (item: any) => {
+        if (item.media_type !== 'movie' && item.media_type !== 'tv') return;
+        
+        summary.items_processed++;
+        try {
+          const { data: existing } = await supabase
+            .from('contents')
+            .select('id, status, last_air_date')
+            .eq('tmdb_id', item.id)
+            .single();
+
+          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+          if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
+          const metadata: TMDBMetadata = await resMetadata.json();
+          
+          const finalType = classifyContentType(metadata, item.media_type as any);
+          const platform = classifyPlatform(metadata, finalType);
+          const genreNames = metadata.genres?.map(g => g.name) || [];
+
+          const { data: dbItem, error: upsertError } = await supabase
+            .from('contents')
+            .upsert({
+              tmdb_id: item.id,
+              title: item.title || item.name,
+              type: finalType,
+              ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
+              platform,
+              cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+              genre_names: genreNames,
+              overview: metadata.overview,
+              poster_path: metadata.poster_path,
+              backdrop_path: metadata.backdrop_path,
+              vote_average: metadata.vote_average,
+              popularity: item.popularity || metadata.popularity || 0,
+              release_date: metadata.release_date || metadata.first_air_date,
+              last_air_date: metadata.last_air_date || null,
+              is_healthy: true
+            }, { onConflict: 'tmdb_id' })
+            .select().single();
+
+          if (upsertError) throw upsertError;
+
+          if (logId) {
+            await this.updateLogProgress(logId, summary.items_processed, data.results.length, item.title || item.name);
+          }
+          
+          await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
+          
+          if (item.media_type === 'tv') {
+            const shouldScrapeDetails = !existing || (metadata.last_air_date && existing.last_air_date !== metadata.last_air_date);
+            if (shouldScrapeDetails) {
+              await this.scrapeTVDetails(dbItem.id, item.id);
+            }
+          }
+          
+          await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
+          
+          summary.items_added++;
+        } catch (err: any) {
+          summary.items_failed++;
+        }
+      }, 3);
+    }
   }
 
   /**
@@ -499,16 +542,16 @@ export class ScraperService {
       const { data: links } = await supabase.from('embed_links').select('*, contents(id, title)');
       
       if (links) {
-        for (const link of links) {
+        await this.pMap(links, async (link: any) => {
           summary.items_processed++;
           try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 8000); 
 
-            const res = await fetch(link.url, { method: 'HEAD', signal: controller.signal });
+            const res = await fetch(link.url, { method: 'GET', signal: controller.signal, headers: { 'Range': 'bytes=0-0' } });
             clearTimeout(timeout);
 
-            const isHealthy = res.ok || res.status === 403; 
+            const isHealthy = res.ok || res.status === 403 || res.status === 206; 
             
             await supabase.from('contents').update({ 
               is_healthy: isHealthy,
@@ -522,7 +565,7 @@ export class ScraperService {
           } catch (err: any) {
             summary.items_failed++;
           }
-        }
+        }, 5);
       }
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
@@ -541,57 +584,68 @@ export class ScraperService {
     if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
 
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Internal Sync Timeout (9 mins reached)')), 9 * 60 * 1000)
+    );
 
     try {
-      const { data: contents } = await supabase.from('contents').select('*');
+      await Promise.race([
+        this.executeSyncAllMetadata(logId, summary),
+        timeoutPromise
+      ]);
       
-      if (contents) {
-        for (const item of contents) {
-          summary.items_processed++;
-          try {
-            const tmdbType = (item.type === 'movie') ? 'movie' : 'tv';
-            const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-            const metadata: TMDBMetadata = await resMetadata.json();
-            
-            const finalType = classifyContentType(metadata, tmdbType);
-            const platform = classifyPlatform(metadata, finalType);
-            const genreNames = metadata.genres?.map(g => g.name) || [];
-            
-            await supabase.from('contents').update({
-              type: finalType,
-              platform,
-              genre_names: genreNames,
-              cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-              overview: metadata.overview,
-              poster_path: metadata.poster_path,
-              backdrop_path: metadata.backdrop_path,
-              vote_average: metadata.vote_average,
-              popularity: metadata.popularity || 0,
-              release_date: metadata.release_date || metadata.first_air_date
-            }).eq('id', item.id);
-
-            if (logId) {
-              await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title);
-            }
-
-            await this.delay(300);
-            
-            if (tmdbType !== 'movie') {
-              await this.scrapeTVDetails(item.id, item.tmdb_id);
-            }
-            
-            summary.items_added++;
-          } catch (err: any) {
-            summary.items_failed++;
-          }
-        }
-      }
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
+      console.error("Sync error:", err);
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
     return summary;
+  }
+
+  private async executeSyncAllMetadata(logId: string, summary: ScrapeTaskSummary) {
+    const { data: contents } = await supabase.from('contents').select('*');
+    if (contents) {
+      await this.pMap(contents, async (item: any) => {
+        summary.items_processed++;
+        try {
+          const tmdbType = (item.type === 'movie') ? 'movie' : 'tv';
+          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+          const metadata: TMDBMetadata = await resMetadata.json();
+          
+          const finalType = classifyContentType(metadata, tmdbType);
+          const platform = classifyPlatform(metadata, finalType);
+          const genreNames = metadata.genres?.map(g => g.name) || [];
+          
+          await supabase.from('contents').update({
+            type: finalType,
+            platform,
+            genre_names: genreNames,
+            cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+            overview: metadata.overview,
+            poster_path: metadata.poster_path,
+            backdrop_path: metadata.backdrop_path,
+            vote_average: metadata.vote_average,
+            popularity: metadata.popularity || 0,
+            release_date: metadata.release_date || metadata.first_air_date,
+            last_air_date: metadata.last_air_date || null
+          }).eq('id', item.id);
+
+          if (logId) {
+            await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title);
+          }
+
+          if (tmdbType !== 'movie') {
+            await this.scrapeTVDetails(item.id, item.tmdb_id);
+          }
+          
+          summary.items_added++;
+        } catch (err: any) {
+          summary.items_failed++;
+        }
+      }, 3);
+    }
   }
 
   /**
@@ -608,7 +662,7 @@ export class ScraperService {
       const { data: contents } = await supabase.from('contents').select('*');
       
       if (contents) {
-        for (const item of contents) {
+        await this.pMap(contents, async (item: any) => {
           summary.items_processed++;
           try {
             const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
@@ -622,12 +676,10 @@ export class ScraperService {
             if (logId) {
               await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title);
             }
-
-            await this.delay(400);
           } catch (err: any) {
             summary.items_failed++;
           }
-        }
+        }, 5);
       }
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {

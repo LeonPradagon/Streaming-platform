@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
 import { 
-  Users, 
   Shield, 
   ShieldCheck, 
   Trash2, 
@@ -14,122 +13,88 @@ import { updateUserRole, deleteUser } from './actions';
 export default async function UserManagement() {
   const supabase = await createClient();
 
-  const { data: profiles, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .order('created_at', { ascending: true });
+  // ⚡ PERFORMANCE: Parallel fetch profiles + current user
+  const [profilesResult, authResult] = await Promise.all([
+    supabase.from('profiles').select('*').order('created_at', { ascending: true }),
+    supabase.auth.getUser(),
+  ]);
 
-  // Get current user to show permissions
-  const { data: { user: currentUser } } = await supabase.auth.getUser();
-  const { data: currentProfile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', currentUser?.id)
-    .single();
+  const profiles = profilesResult.data;
+  const currentUser = authResult.data?.user;
+
+  // Only fetch current profile if user exists
+  const { data: currentProfile } = currentUser 
+    ? await supabase.from('profiles').select('role').eq('id', currentUser.id).single()
+    : { data: null };
 
   const isSuperAdmin = currentProfile?.role === 'super_admin';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '-0.5px' }}>Manajemen Admin</h2>
-          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Kelola hak akses dan peran administrator sistem.</p>
+          <h2 className="text-3xl font-black text-white tracking-tight">Manajemen Admin</h2>
+          <p className="text-zinc-500 font-medium">Kelola hak akses dan peran administrator sistem.</p>
         </div>
         {!isSuperAdmin && (
-          <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <Lock size={16} color="#ef4444" />
-            <span style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 600 }}>Limited Access (Moderator)</span>
+          <div className="glass px-5 py-3 rounded-2xl flex items-center gap-3 border border-red-500/20 shadow-xl shadow-red-500/5">
+            <Lock size={18} className="text-red-500" />
+            <span className="text-xs font-black text-red-500 uppercase tracking-widest">Limited Access (Moderator)</span>
           </div>
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {profiles?.map((profile) => (
-          <div key={profile.id} className="glass" style={{ 
-            padding: '2rem', 
-            borderRadius: '1.5rem',
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
-            {/* Role Badge Background */}
-            <div style={{ 
-              position: 'absolute', 
-              top: '-10px', 
-              right: '-10px', 
-              opacity: 0.05,
-              transform: 'rotate(-10deg)'
-            }}>
-              {profile.role === 'super_admin' ? <ShieldCheck size={120} /> : <Shield size={120} />}
+          <div key={profile.id} className="glass group relative overflow-hidden p-8 rounded-3xl border border-white/5 hover:border-white/10 transition-all">
+            {/* Role Badge Background Decoration */}
+            <div className="absolute -top-6 -right-6 opacity-[0.03] rotate-[-15deg] group-hover:rotate-0 transition-transform duration-700 pointer-events-none">
+              {profile.role === 'super_admin' ? <ShieldCheck size={160} /> : <Shield size={160} />}
             </div>
 
-            <div style={{ display: 'flex', gap: '1.5rem', position: 'relative', zIndex: 1 }}>
-              <div style={{ 
-                width: '64px', 
-                height: '64px', 
-                borderRadius: '1.5rem', 
-                backgroundColor: 'rgba(255,255,255,0.03)', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                border: profile.role === 'super_admin' ? '1px solid rgba(234, 179, 8, 0.3)' : '1px solid rgba(255,255,255,0.05)'
-              }}>
-                {profile.role === 'super_admin' ? <ShieldCheck size={32} color="#eab308" /> : <Shield size={32} color="#94a3b8" />}
+            <div className="flex gap-6 relative z-10">
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 border shadow-2xl transition-all duration-500 ${
+                profile.role === 'super_admin' 
+                  ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500 group-hover:bg-yellow-500 group-hover:text-black group-hover:scale-110' 
+                  : 'bg-white/5 border-white/5 text-zinc-500 group-hover:text-white'
+              }`}>
+                {profile.role === 'super_admin' ? <ShieldCheck size={32} /> : <Shield size={32} />}
               </div>
               
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>{profile.full_name}</h3>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-xl font-black text-white truncate">{profile.full_name}</h3>
                   {profile.id === currentUser?.id && (
-                    <span style={{ fontSize: '0.65rem', padding: '0.2rem 0.5rem', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '0.5rem', color: '#94a3b8' }}>YOU</span>
+                    <span className="px-1.5 py-0.5 bg-white/10 rounded-md text-[10px] font-black text-zinc-400 border border-white/5 uppercase tracking-tighter">ME</span>
                   )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#64748b', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                  <Mail size={12} /> {profile.id.slice(0, 16)}...
+                <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium truncate">
+                  <Mail size={14} className="text-zinc-600" /> {profile.id.slice(0, 16)}...
                 </div>
                 
-                <div style={{ marginTop: '1.25rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px' }}>Peran</div>
-                  <div style={{ 
-                    fontSize: '0.9rem', 
-                    fontWeight: 700, 
-                    color: profile.role === 'super_admin' ? '#eab308' : '#94a3b8',
-                    marginTop: '0.2rem'
-                  }}>
+                <div className="mt-6">
+                  <div className="text-[10px] font-black text-zinc-600 uppercase tracking-[2px] mb-1">Role Assigned</div>
+                  <div className={`text-sm font-black tracking-tight ${
+                    profile.role === 'super_admin' ? 'text-yellow-500' : 'text-zinc-400'
+                  }`}>
                     {profile.role === 'super_admin' ? 'Super Administrator' : 'Moderator / Editor'}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div style={{ 
-              marginTop: '2rem', 
-              paddingTop: '1.5rem', 
-              borderTop: '1px solid rgba(255,255,255,0.05)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#475569', fontSize: '0.8rem' }}>
-                <Calendar size={14} /> Terdaftar {new Date(profile.created_at).toLocaleDateString()}
+            <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center relative z-10">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-zinc-600 uppercase tracking-wider">
+                <Calendar size={14} /> Registered {new Date(profile.created_at).toLocaleDateString()}
               </div>
 
               {isSuperAdmin && profile.id !== currentUser?.id && (
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <div className="flex gap-3">
                   <form action={async () => {
                     'use server';
                     await updateUserRole(profile.id, profile.role === 'super_admin' ? 'moderator' : 'super_admin');
                   }}>
-                    <button style={{ 
-                      backgroundColor: 'rgba(56, 189, 248, 0.1)', 
-                      color: '#38bdf8', 
-                      border: 'none', 
-                      padding: '0.5rem 1rem', 
-                      borderRadius: '0.75rem', 
-                      fontSize: '0.8rem', 
-                      fontWeight: 700, 
-                      cursor: 'pointer' 
-                    }}>
+                    <button className="px-4 py-2 rounded-xl bg-white/5 text-white font-black text-[10px] uppercase tracking-widest border border-white/5 hover:bg-sky-500 hover:text-black hover:border-sky-500 transition-all">
                       Switch Role
                     </button>
                   </form>
@@ -137,14 +102,7 @@ export default async function UserManagement() {
                     'use server';
                     await deleteUser(profile.id);
                   }}>
-                    <button style={{ 
-                      backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-                      color: '#ef4444', 
-                      border: 'none', 
-                      padding: '0.5rem', 
-                      borderRadius: '0.75rem', 
-                      cursor: 'pointer' 
-                    }}>
+                    <button className="p-2 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 transition-all">
                       <Trash2 size={18} />
                     </button>
                   </form>
@@ -155,21 +113,13 @@ export default async function UserManagement() {
         ))}
 
         {isSuperAdmin && (
-          <div style={{ 
-            border: '2px dashed rgba(255,255,255,0.05)', 
-            borderRadius: '1.5rem', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            gap: '1rem',
-            minHeight: '200px',
-            color: '#475569'
-          }}>
-            <UserPlus size={40} />
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontWeight: 700, color: '#94a3b8' }}>Tambah Admin Baru?</div>
-              <div style={{ fontSize: '0.8rem' }}>Minta mereka mendaftar di halaman /register</div>
+          <div className="border-2 border-dashed border-white/5 rounded-3xl p-12 flex flex-col items-center justify-center gap-4 text-center hover:bg-white/[0.02] transition-colors cursor-default group">
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center text-zinc-600 group-hover:scale-110 group-hover:text-zinc-400 transition-all duration-500">
+              <UserPlus size={40} />
+            </div>
+            <div>
+              <div className="font-black text-white text-lg tracking-tight">Tambah Admin Baru?</div>
+              <div className="text-zinc-600 text-sm font-medium max-w-[200px]">Minta kolega mendaftar di halaman pendaftaran umum.</div>
             </div>
           </div>
         )}

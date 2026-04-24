@@ -5,37 +5,33 @@ import { Flame } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 
 export default async function TrendingPage() {
-  // Fetch top 40 trending from Supabase DB ordered by popularity
-  // This popularity score is synced directly from TMDB's trending API during scraper execution
-  const { data: dbContents, error } = await supabase
-    .from('contents')
-    .select('*, seasons(id)')
-    .eq('status', 'approved')
-    .order('popularity', { ascending: false, nullsFirst: false })
-    .limit(40);
-  
+  // ⚡ PERFORMANCE: Parallel fetch content + settings
+  const [contentResult, settingsResult] = await Promise.all([
+    supabase
+      .from('contents')
+      .select('id, tmdb_id, title, type, poster_path, vote_average, popularity, release_date')
+      .eq('status', 'approved')
+      .order('popularity', { ascending: false, nullsFirst: false })
+      .limit(40),
+    supabase.from('settings').select('value').eq('key', 'site_config').single(),
+  ]);
+
+  const dbContents = contentResult.data;
+  const error = contentResult.error;
+  const siteConfig = settingsResult.data?.value || { title: 'Netix' };
+
   let validResults: any[] = [];
-  
   if (!error && dbContents) {
     validResults = dbContents.map((item) => ({
       ...item,
-      seasonsCount: item.seasons ? item.seasons.length : undefined,
       metadata: {
         poster_path: item.poster_path,
         vote_average: typeof item.vote_average === 'number' ? item.vote_average : parseFloat(item.vote_average || '0'),
         release_date: item.release_date,
-        first_air_date: item.release_date, // For TV backwards compatibility
+        first_air_date: item.release_date,
       }
     }));
   }
-
-  // Fetch Site Config for brand name
-  const { data: settingsData } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "site_config")
-    .single();
-  const siteConfig = settingsData?.value || { title: "Netix" };
 
   return (
     <div className="min-h-screen pt-28 px-4 md:px-12 lg:px-20 animate-fade-in relative z-10 pb-20">

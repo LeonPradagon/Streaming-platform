@@ -30,7 +30,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
   
   const backdropUrl = getTMDBImageUrl(
     currentItem.metadata?.backdrop_path || currentItem.metadata?.poster_path,
-    'original'
+    'w1280'
   );
 
   const rating = currentItem.metadata?.vote_average
@@ -38,7 +38,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
     : null;
 
   return (
-    <section className="relative w-full h-[55vh] md:h-[65vh] lg:h-[75vh] flex items-end overflow-hidden bg-[#0f0f0f] pb-6 md:pb-8 ">
+    <section className="relative w-full h-[55vh] md:h-[65vh] lg:h-[75vh] flex items-end overflow-hidden bg-[#0f0f0f] pb-6 md:pb-8 group">
       {/* Background Poster */}
       {backdropUrl && (
         <Image
@@ -143,28 +143,26 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
           </div>
         </div>
       </div>
-      {/* Preload Next/Prev Images */}
-      <div className="hidden">
-        {items.map((item, idx) => {
-          // Preload only if it's the next or previous slide relative to current
-          const isNext = idx === (currentIndex + 1) % items.length;
-          const isPrev = idx === (currentIndex - 1 + items.length) % items.length;
-          if (isNext || isPrev) {
-             const preloadUrl = getTMDBImageUrl(
-               item.metadata?.backdrop_path || item.metadata?.poster_path || "",
-               "original"
-             );
-             return (
-               <img 
-                 key={idx} 
-                 src={preloadUrl} 
-                 alt="preload" 
-               />
-             );
-          }
-          return null;
-        })}
-      </div>
+      {/* Preload Next/Prev Images via link tags (no hidden img downloads) */}
+      {items.map((item, idx) => {
+        const isNext = idx === (currentIndex + 1) % items.length;
+        const isPrev = idx === (currentIndex - 1 + items.length) % items.length;
+        if (isNext || isPrev) {
+           const preloadUrl = getTMDBImageUrl(
+             item.metadata?.backdrop_path || item.metadata?.poster_path || "",
+             "w1280"
+           );
+           return (
+             <link 
+               key={idx} 
+               rel="prefetch" 
+               href={preloadUrl} 
+               as="image" 
+             />
+           );
+        }
+        return null;
+      })}
     </section>
   );
 }

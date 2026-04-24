@@ -22,13 +22,13 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  // 1. Fetch approved content with basic info
+  // 1. Fetch approved content — SELECT only needed columns, no JOINs
   const { data: allContent, error: dbError } = await supabase
     .from("contents")
-    .select("*, seasons(id)")
+    .select("id, tmdb_id, title, type, overview, poster_path, backdrop_path, vote_average, popularity, release_date, platform, genre_names, cast_data, quality")
     .eq("status", "approved")
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(120);
 
   if (dbError || !allContent) {
     return (
@@ -59,7 +59,6 @@ export default async function Home() {
       credits: { cast: item.cast_data || [] },
     },
     platform: item.platform || "other",
-    seasonsCount: item.seasons?.length,
   }));
 
   // 3. Grouping using utility
@@ -138,7 +137,7 @@ export default async function Home() {
         {latest.length > 0 && (
           <ContentRow
             title="New Releases"
-            items={latest}
+            items={latest.slice(0, 30)}
             isNewRow={true}
             icon={<Sparkles size={22} />}
           />
@@ -148,7 +147,7 @@ export default async function Home() {
         {trending.length > 0 && (
           <ContentRow
             title="Trending Now"
-            items={trending}
+            items={trending.slice(0, 30)}
             isNewRow={false}
             isTrendingRow={true}
             icon={<Flame size={22} />}
@@ -160,7 +159,7 @@ export default async function Home() {
         {typeGroups.drakor.length > 0 && (
           <ContentRow
             title={TYPE_LABELS.drakor}
-            items={typeGroups.drakor}
+            items={typeGroups.drakor.slice(0, 30)}
             icon={<Tv size={22} />}
             viewAllHref="/browse?type=tv"
           />
@@ -170,7 +169,7 @@ export default async function Home() {
         {genreGroups["Aksi & Petualangan"].length > 0 && (
           <ContentRow
             title="Popular Movies"
-            items={genreGroups["Aksi & Petualangan"]}
+            items={genreGroups["Aksi & Petualangan"].slice(0, 30)}
             icon={<Clapperboard size={22} />}
             viewAllHref="/browse?type=movie"
           />
@@ -180,7 +179,7 @@ export default async function Home() {
         {platformGroups.netflix.length > 0 && (
           <ContentRow
             title={PLATFORM_LABELS.netflix}
-            items={platformGroups.netflix}
+            items={platformGroups.netflix.slice(0, 30)}
             platformColor={PLATFORM_COLORS.netflix}
             viewAllHref="/browse?type=all"
           />
@@ -190,7 +189,7 @@ export default async function Home() {
         {typeGroups.drachin.length > 0 && (
           <ContentRow
             title={TYPE_LABELS.drachin}
-            items={typeGroups.drachin}
+            items={typeGroups.drachin.slice(0, 30)}
             icon={<MonitorPlay size={22} />}
           />
         )}
@@ -199,7 +198,7 @@ export default async function Home() {
         {genreGroups["Drama & Romansa"].length > 0 && (
           <ContentRow
             title="Top Rated"
-            items={genreGroups["Drama & Romansa"]}
+            items={genreGroups["Drama & Romansa"].slice(0, 30)}
             icon={<FilmIcon size={22} />}
           />
         )}

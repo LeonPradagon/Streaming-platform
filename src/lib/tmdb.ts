@@ -40,6 +40,7 @@ export interface TMDBMetadata {
   popularity?: number;
   release_date?: string;
   first_air_date?: string;
+  last_air_date?: string;
   status?: string;
   genres: { id: number; name: string }[];
   networks?: { id: number; name: string; logo_path?: string }[];
@@ -57,7 +58,7 @@ export const fetchTMDBMetadata = async (id: number, type: 'movie' | 'tv'): Promi
   }
 
   try {
-    const response = await fetch(`${TMDB_BASE_URL}/${type}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`);
+    const response = await fetch(`${TMDB_BASE_URL}/${type}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`, { next: { revalidate: 3600 } });
     
     if (!response.ok) {
       throw new Error(`TMDB API Error: ${response.statusText}`);
@@ -74,7 +75,7 @@ export const fetchTMDBMetadata = async (id: number, type: 'movie' | 'tv'): Promi
 export const fetchTMDBTVSeasonDetails = async (tvId: number, seasonNumber: number): Promise<TMDBSeason | null> => {
   if (!TMDB_API_KEY) return null;
   try {
-    const response = await fetch(`${TMDB_BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}`);
+    const response = await fetch(`${TMDB_BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}`, { next: { revalidate: 3600 } });
     if (!response.ok) throw new Error(`TMDB API Error: ${response.statusText}`);
     return await response.json();
   } catch (error) {
@@ -86,7 +87,7 @@ export const fetchTMDBTVSeasonDetails = async (tvId: number, seasonNumber: numbe
 /**
  * Get image URL from TMDB path
  */
-export const getTMDBImageUrl = (path: string, size: 'w185' | 'w342' | 'w500' | 'original' = 'w500') => {
+export const getTMDBImageUrl = (path: string, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original' = 'w500') => {
   if (!path) return '/placeholder-poster.png';
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };

@@ -1,140 +1,90 @@
 import { createClient } from '@/lib/supabase/server';
 import { approveContent, rejectContent, approveAllContent } from './actions';
-import { Check, X, AlertCircle, Film, Tv } from 'lucide-react';
+import { Check, X, AlertCircle, Film } from 'lucide-react';
 import SweetApprove from '@/components/Admin/SweetApprove';
+import Image from 'next/image';
+import { getTMDBImageUrl } from '@/lib/tmdb';
 
 export default async function ApprovePage() {
   const supabase = await createClient();
 
-  // Fetch pending content
+  // Fetch pending content — select only needed columns
   const { data: pendingContent } = await supabase
     .from('contents')
-    .select('*')
+    .select('id, title, tmdb_id, type, poster_path, status')
     .eq('status', 'pending')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(50);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Persetujuan Konten</h2>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            {pendingContent && pendingContent.length > 0 && (
-              <SweetApprove approveAllAction={approveAllContent} />
-            )}
-            <span style={{ 
-            padding: '0.4rem 0.8rem', 
-            backgroundColor: 'rgba(234, 179, 8, 0.1)', 
-            color: '#eab308', 
-            borderRadius: '2rem', 
-            fontSize: '0.8rem', 
-            fontWeight: 700 
-          }}>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <h2 className="text-3xl font-black text-white tracking-tight">Persetujuan Konten</h2>
+        <div className="flex gap-4 items-center">
+          {pendingContent && pendingContent.length > 0 && (
+            <SweetApprove approveAllAction={approveAllContent} />
+          )}
+          <span className="bg-yellow-500/10 text-yellow-500 px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-widest border border-yellow-500/20 shadow-lg shadow-yellow-500/5">
             {pendingContent?.length || 0} Menunggu Review
           </span>
         </div>
       </div>
 
       {!pendingContent || pendingContent.length === 0 ? (
-        <div className="glass" style={{ textAlign: 'center', padding: '5rem', borderRadius: '1.5rem' }}>
-          <div style={{ color: '#475569', marginBottom: '1rem' }}><Check size={48} style={{ margin: '0 auto' }} /></div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc' }}>Semua Beres!</h3>
-          <p style={{ color: '#64748b' }}>Tidak ada konten yang menunggu persetujuan saat ini.</p>
+        <div className="glass flex flex-col items-center justify-center p-20 rounded-3xl text-center border border-white/5">
+          <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 border border-emerald-500/20">
+            <Check size={40} className="text-emerald-500" />
+          </div>
+          <h3 className="text-2xl font-black text-white mb-2">Semua Beres!</h3>
+          <p className="text-zinc-500 font-medium">Tidak ada konten yang menunggu persetujuan saat ini.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: '1.5rem' }}>
+        <div className="grid gap-6">
           {pendingContent.map((item: any) => (
-            <div key={item.id} className="glass" style={{ 
-              padding: '1.5rem', 
-              borderRadius: '1.5rem', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '2rem',
-              transition: 'transform 0.2s ease',
-              border: '1px solid rgba(255,255,255,0.05)'
-            }}>
-              {/* Poster Placeholder */}
-              <div style={{ 
-                width: '80px', 
-                height: '110px', 
-                backgroundColor: 'rgba(255,255,255,0.03)', 
-                borderRadius: '0.75rem', 
-                overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0
-              }}>
-                <img 
-                  src={item.poster_url || `https://placehold.co/400x600/060d17/eab308?text=${item.title}`} 
+            <div key={item.id} className="glass group p-6 rounded-3xl flex flex-col md:flex-row items-center gap-8 border border-white/5 hover:border-white/10 transition-all">
+              {/* Poster */}
+              <div className="relative w-24 h-36 bg-white/5 rounded-2xl overflow-hidden shrink-0 border border-white/5 shadow-2xl group-hover:scale-[1.02] transition-transform duration-500">
+                <Image 
+                  src={getTMDBImageUrl(item.poster_path, 'w185')} 
                   alt={item.title} 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  fill
+                  className="object-cover"
                 />
               </div>
 
               {/* Info */}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                  <h4 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>{item.title}</h4>
-                  <span style={{ 
-                    padding: '0.2rem 0.5rem', 
-                    borderRadius: '4px', 
-                    fontSize: '0.65rem', 
-                    fontWeight: 900, 
-                    backgroundColor: item.type === 'movie' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(56, 189, 248, 0.1)',
-                    color: item.type === 'movie' ? '#eab308' : '#38bdf8',
-                    textTransform: 'uppercase'
-                  }}>
+              <div className="flex-1 text-center md:text-left min-w-0">
+                <div className="flex flex-col md:flex-row items-center gap-3 mb-3">
+                  <h4 className="text-xl font-black text-white truncate max-w-md">{item.title}</h4>
+                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
+                    item.type === 'movie' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-sky-500/10 text-sky-400 border-sky-400/20'
+                  }`}>
                     {item.type}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: '#64748b' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}><Film size={14} /> ID: {item.tmdb_id}</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}><AlertCircle size={14} /> Source: Scraper</span>
+                <div className="flex flex-wrap justify-center md:justify-start gap-6 text-xs font-bold text-zinc-500">
+                  <span className="flex items-center gap-2"><Film size={14} className="text-zinc-600" /> ID: {item.tmdb_id}</span>
+                  <span className="flex items-center gap-2"><AlertCircle size={14} className="text-zinc-600" /> Source: Scraper</span>
                 </div>
               </div>
 
               {/* Actions */}
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <form action={rejectContent.bind(null, item.id, item.title)}>
+              <div className="flex gap-4 w-full md:w-auto">
+                <form action={rejectContent.bind(null, item.id, item.title)} className="flex-1 md:flex-none">
                   <button 
                     type="submit" 
-                    style={{ 
-                      padding: '0.75rem 1.25rem', 
-                      borderRadius: '0.75rem', 
-                      backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-                      color: '#ef4444', 
-                      border: '1px solid rgba(239, 68, 68, 0.1)',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      transition: 'all 0.2s'
-                    }}
-                    className="hover:bg-red-500/20"
+                    className="w-full px-6 py-4 rounded-2xl bg-white/5 text-red-500 border border-white/5 font-black text-xs uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-3"
                   >
                     <X size={18} /> Reject
                   </button>
                 </form>
                 
-                <form action={approveContent.bind(null, item.id, item.title)}>
+                <form action={approveContent.bind(null, item.id, item.title)} className="flex-1 md:flex-none">
                   <button 
                     type="submit" 
-                    style={{ 
-                      padding: '0.75rem 1.5rem', 
-                      borderRadius: '0.75rem', 
-                      backgroundColor: '#10b981', 
-                      color: '#060d17', 
-                      border: 'none',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      boxShadow: '0 4px 12px -2px rgba(16, 185, 129, 0.3)'
-                    }}
+                    className="w-full px-8 py-4 rounded-2xl bg-emerald-500 text-black font-black text-xs uppercase tracking-widest hover:scale-[1.05] active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-xl shadow-emerald-500/20"
                   >
-                    <Check size={18} /> Approve
+                    <Check size={18} strokeWidth={3} /> Approve
                   </button>
                 </form>
               </div>

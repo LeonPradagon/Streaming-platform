@@ -11,10 +11,14 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
+  // ⚡ PERFORMANCE: Parallel auth + settings fetch
+  const [authResult, siteConfigReq] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from("settings").select("value").eq("key", "site_config").single(),
+  ]);
+
+  const user = authResult.data?.user;
   if (!user) {
     redirect("/login");
   }
@@ -28,14 +32,8 @@ export default async function AdminLayout({
   if (!profile || (profile.role !== "super_admin" && profile.role !== "moderator")) {
     redirect("/");
   }
-
-  const { data: siteConfigReq } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "site_config")
-    .single();
     
-  const brandName = siteConfigReq?.value?.title || "OHAYO";
+  const brandName = siteConfigReq.data?.value?.title || "OHAYO";
 
   return (
     <div className="flex min-h-screen bg-[#060d17] text-[#f8fafc]">

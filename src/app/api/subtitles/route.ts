@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   }
   rateLimitMap.set(ip, rateRecord);
 
-  if (rateRecord.count > 15) {
+  if (rateRecord.count > 30) {
     return NextResponse.json({ error: 'Too many requests / Rate Limited' }, { status: 429 });
   }
 

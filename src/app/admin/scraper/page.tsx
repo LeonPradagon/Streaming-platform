@@ -5,18 +5,16 @@ import {
   Play, 
   RefreshCw, 
   CheckCircle2, 
-  AlertCircle, 
   Activity, 
   Zap, 
   History,
   Terminal,
   Clock,
-  ExternalLink,
   XCircle,
-  Subtitles
+  Subtitles,
+  Info
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { PLATFORM_COLORS } from '@/lib/tmdb';
 import { adminAlert } from '@/lib/swal';
 
 export default function ScraperAdmin() {
@@ -45,7 +43,6 @@ export default function ScraperAdmin() {
       .limit(10);
     if (data) {
       setLogs(data);
-      // If the latest log is running, update the progress state
       const latest = data[0];
       if (latest && latest.status === 'running') {
         if (latest.progress) setProgress(latest.progress);
@@ -63,15 +60,11 @@ export default function ScraperAdmin() {
     fetchLogs();
     fetchHealth();
     
-    // Polling health every 30 seconds
     const healthInterval = setInterval(fetchHealth, 30000);
-    
-    // Polling logs every 2 seconds if a task is running (fallback for realtime)
     const logsInterval = setInterval(() => {
       fetchLogs();
     }, 2000);
     
-    // Subscribe to real-time updates for scraper_logs
     const channel = supabase
       .channel('scraper-status')
       .on('postgres_changes', { 
@@ -85,7 +78,7 @@ export default function ScraperAdmin() {
         } else {
           setProgress(null);
         }
-        fetchLogs(); // Always refresh list on any change
+        fetchLogs();
       })
       .subscribe();
 
@@ -101,7 +94,7 @@ export default function ScraperAdmin() {
     
     const confirm = await adminAlert.confirm(
       'Konfirmasi Tugas', 
-      `Apakah Anda yakin ingin menjalankan ${taskType}? Ini mungkin memakan waktu beberapa menit.`,
+      `Jalankan ${taskType}? Proses ini berjalan di background.`,
       'Ya, Jalankan'
     );
     if (!confirm.isConfirmed) return;
@@ -121,8 +114,8 @@ export default function ScraperAdmin() {
       adminAlert.close();
       
       if (result.success) {
-        adminAlert.success('Tugas Dimulai!', 'Cek progress bar di bawah untuk status real-time.');
-        fetchLogs(); // Immediately refresh to show the new 'running' task in history
+        adminAlert.success('Tugas Dimulai!', 'Monitor progress bar untuk status terbaru.');
+        fetchLogs();
       } else {
         adminAlert.error('Gagal!', result.error || 'Terjadi kesalahan.');
         setIsLoading(false);
@@ -136,16 +129,19 @@ export default function ScraperAdmin() {
   };
 
   return (
-    <div className="flex flex-col gap-8 animate-fade-in">
+    <div className="flex flex-col gap-10 animate-fade-in">
       
       {/* Header Info */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-black flex items-center gap-3">
-          <Zap className="text-yellow-500" /> Control Tower Scraper
-        </h2>
-        <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-xs font-bold text-green-500 uppercase tracking-wider">System Ready</span>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+            <Zap className="text-yellow-500" size={32} /> Control Tower Scraper
+          </h2>
+          <p className="text-zinc-500 font-medium mt-1">Otomasi sinkronisasi metadata, link stream, dan subtitle.</p>
+        </div>
+        <div className="flex items-center gap-2.5 px-4 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl w-fit">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Core Engine Active</span>
         </div>
       </div>
 
@@ -153,127 +149,133 @@ export default function ScraperAdmin() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <ControlCard 
           title="Deep Discovery"
-          desc="Cari film baru dengan tracker halaman. Melanjutkan dari scrape terakhir."
+          desc="Cari film baru dengan TMDB tracker. Melanjutkan state terakhir."
           icon={<Play size={24} />}
           onClick={() => runTask('scrape')}
           loading={activeTask === 'scrape'}
-          color="#eab308"
+          color="rgba(234, 179, 8, 1)"
+          bg="rgba(234, 179, 8, 0.1)"
         />
         <ControlCard 
-          title="Trending Now"
-          desc="Ambil konten yang sedang viral di TMDB minggu ini secara instan."
+          title="Trending"
+          desc="Ambil konten viral TMDB minggu ini secara instan ke database."
           icon={<Zap size={24} />}
           onClick={() => runTask('trending')}
           loading={activeTask === 'trending'}
-          color="#f43f5e"
+          color="rgba(244, 63, 94, 1)"
+          bg="rgba(244, 63, 94, 0.1)"
         />
         <ControlCard 
           title="Metadata Sync"
-          desc="Sinkronkan ulang Genre & Seasons untuk semua konten lama."
+          desc="Sinkronkan ulang Genre, Seasons & Images untuk konten lama."
           icon={<RefreshCw size={24} />}
           onClick={() => runTask('sync')}
           loading={activeTask === 'sync'}
-          color="#38bdf8"
+          color="rgba(56, 189, 248, 1)"
+          bg="rgba(56, 189, 248, 0.1)"
         />
         <ControlCard 
           title="Health Check"
-          desc="Validasi link video apakah masih aktif atau sudah diblokir."
+          desc="Validasi link stream apakah masih aktif atau sudah broken."
           icon={<Activity size={24} />}
           onClick={() => runTask('validate')}
           loading={activeTask === 'validate'}
-          color="#10b981"
+          color="rgba(16, 185, 129, 1)"
+          bg="rgba(16, 185, 129, 0.1)"
         />
         <ControlCard 
-          title="Sync Subtitles"
-          desc="Unduh otomatis subtitle Indonesia/English untuk semua film di database."
+          title="Subtitles"
+          desc="Auto-fetch subtitle Indo/Eng untuk seluruh katalog."
           icon={<Subtitles size={24} />}
           onClick={() => runTask('subtitles')}
           loading={activeTask === 'subtitles'}
-          color="#8b5cf6"
+          color="rgba(139, 92, 246, 1)"
+          bg="rgba(139, 92, 246, 0.1)"
         />
       </div>
 
       {/* Real-time Progress Bar */}
       {progress && (
-        <div className="glass p-8 rounded-2xl border border-primary/20 bg-primary/5 animate-in slide-in-from-top duration-500">
-          <div className="flex justify-between items-end mb-4">
-            <div>
-              <h3 className="text-xl font-black text-white flex items-center gap-2">
-                <RefreshCw className="animate-spin text-primary" size={20} />
-                Sedang Memproses...
+        <div className="glass p-10 rounded-3xl border border-yellow-500/20 bg-yellow-500/5 animate-in slide-in-from-top duration-700 shadow-2xl shadow-yellow-500/5">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-2xl font-black text-white flex items-center gap-3">
+                <RefreshCw className="animate-spin text-yellow-500" size={24} />
+                Executing Pipeline...
               </h3>
-              <p className="text-sm text-gray-400 mt-1">
-                Memproses: <span className="text-primary font-bold">{progress.current_item || 'Menghitung...'}</span>
+              <p className="text-sm text-zinc-400 mt-2 font-medium flex items-center gap-2">
+                Processing: <span className="text-yellow-500 font-black truncate max-w-[300px]">{progress.current_item || 'Scanning...'}</span>
               </p>
             </div>
-            <div className="text-right">
-              <span className="text-3xl font-black text-primary">
+            <div className="text-right shrink-0">
+              <span className="text-5xl font-black text-yellow-500 tabular-nums">
                 {Math.round((progress.current / (progress.total || 1)) * 100)}%
               </span>
-              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                {progress.current} / {progress.total} Item
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-[3px] mt-1">
+                {progress.current} / {progress.total} Items
               </p>
             </div>
           </div>
           
-          <div className="w-full h-4 bg-white/5 rounded-full overflow-hidden border border-white/5 p-1">
+          <div className="w-full h-6 bg-black/40 rounded-2xl overflow-hidden border border-white/5 p-1.5 shadow-inner">
             <div 
-              className="h-full bg-gradient-to-r from-primary to-yellow-500 rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_rgba(234,179,8,0.3)]"
+              className="h-full bg-gradient-to-r from-yellow-600 via-yellow-400 to-yellow-300 rounded-xl transition-all duration-700 ease-out shadow-[0_0_20px_rgba(234,179,8,0.4)]"
               style={{ width: `${(progress.current / (progress.total || 1)) * 100}%` }}
             />
           </div>
         </div>
       )}
 
-      {/* Main Content Area: Logs and Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-8">
+      {/* Main Content Area */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Histori Log */}
-        <section className="glass rounded-2xl overflow-hidden border border-white/5">
-          <div className="p-6 border-b border-white/5 bg-white/2">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <History size={20} className="text-gray-400" /> Histori Aktivitas
+        <section className="glass rounded-3xl overflow-hidden border border-white/5 lg:col-span-2 shadow-xl">
+          <div className="p-8 border-b border-white/5 bg-white/[0.02] flex justify-between items-center">
+            <h3 className="text-xl font-black text-white flex items-center gap-3">
+              <History size={24} className="text-zinc-500" /> Histori Aktivitas
             </h3>
+            <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">Latest 10 logs</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-white/5 text-gray-400 text-xs font-black uppercase tracking-widest border-b border-white/5">
-                  <th className="px-6 py-4">Tugas</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Item</th>
-                  <th className="px-6 py-4">Mulai</th>
-                  <th className="px-6 py-4">Durasi</th>
+                <tr className="bg-white/5 text-zinc-500 text-[10px] font-black uppercase tracking-[2px] border-b border-white/5">
+                  <th className="px-8 py-5">Tugas</th>
+                  <th className="px-8 py-5">Status</th>
+                  <th className="px-8 py-5">Item</th>
+                  <th className="px-8 py-5">Mulai</th>
+                  <th className="px-8 py-5">Info</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-white/2 transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-sm text-white group-hover:text-primary transition-colors">{log.task_name}</div>
-                      {log.error_message && <div className="text-[10px] text-red-500 mt-1 max-w-[200px] truncate">{log.error_message}</div>}
+                  <tr key={log.id} className="hover:bg-white/[0.02] transition-colors group">
+                    <td className="px-8 py-5">
+                      <div className="font-black text-sm text-zinc-300 group-hover:text-yellow-500 transition-colors uppercase tracking-tight">{log.task_name}</div>
+                      {log.error_message && <div className="text-[10px] font-bold text-red-500/80 mt-1 max-w-[200px] truncate">{log.error_message}</div>}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-8 py-5">
                       <StatusBadge status={log.status} />
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-mono text-gray-400">
+                    <td className="px-8 py-5">
+                      <div className="text-sm font-black text-zinc-400 tabular-nums">
                         {log.summary?.items_added !== undefined ? `+${log.summary.items_added}` : log.items_count || 0}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-xs text-gray-500 font-semibold">
+                    <td className="px-8 py-5 text-xs text-zinc-600 font-black uppercase tracking-tighter">
                       {new Date(log.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                        <Clock size={12} /> {log.finished_at ? 'Selesai' : 'Running...'}
+                    <td className="px-8 py-5">
+                      <div className="flex items-center gap-2 text-[10px] text-zinc-700 font-black uppercase tracking-widest">
+                        <Clock size={14} /> {log.finished_at ? 'Completed' : 'Running'}
                       </div>
                     </td>
                   </tr>
                 ))}
                 {logs.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500 italic">Belum ada aktivitas scraper tercatat.</td>
+                    <td colSpan={5} className="px-8 py-20 text-center text-zinc-600 font-bold italic italic">Belum ada aktivitas scraper tercatat.</td>
                   </tr>
                 )}
               </tbody>
@@ -282,31 +284,38 @@ export default function ScraperAdmin() {
         </section>
 
         {/* Status Panel */}
-        <div className="flex flex-col gap-6">
-          <div className="glass p-6 rounded-2xl border border-white/5">
-            <h4 className="text-sm font-black text-gray-500 uppercase tracking-widest mb-4">Integrasi Provider</h4>
-            <div className="space-y-4">
+        <div className="flex flex-col gap-8">
+          <div className="glass p-8 rounded-3xl border border-white/5 shadow-xl">
+            <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-[3px] mb-8">Service Integrations</h4>
+            <div className="space-y-6">
                {providers.length > 0 ? (
                  providers.map((p) => (
                    <ProviderStatus key={p.name} name={p.name} status={p.status} delay={p.delay} isHealthy={p.isHealthy} />
                  ))
                ) : (
-                 <div className="text-xs text-gray-500 italic animate-pulse">Checking status...</div>
+                 <div className="flex flex-col gap-4">
+                    {[1,2,3].map(i => <div key={i} className="h-10 bg-white/5 rounded-xl animate-pulse" />)}
+                 </div>
                )}
             </div>
             <button 
               onClick={() => setShowDebug(true)}
-              className="w-full mt-6 py-2 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+              className="w-full mt-10 py-4 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest rounded-2xl border border-white/5 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
             >
-               <Terminal size={14} /> Buka Debug Console
+               <Terminal size={18} /> Console Debug
             </button>
           </div>
 
-          <div className="glass p-6 rounded-2xl border border-white/5 bg-primary/5">
-             <h4 className="text-sm font-black text-primary uppercase tracking-widest mb-2">Tips Scraper</h4>
-             <p className="text-xs text-gray-400 leading-relaxed">
-               Gunakan <b>Full Discovery</b> hanya saat malam hari atau saat traffic rendah untuk mengurangi beban TMDB API. 
-               <b>Health Check</b> disarankan dilakukan 2 hari sekali.
+          <div className="glass p-8 rounded-3xl border border-yellow-500/10 bg-yellow-500/[0.02]">
+             <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+                  <Info size={16} className="text-yellow-500" />
+                </div>
+                <h4 className="text-xs font-black text-yellow-500 uppercase tracking-[2px]">Admin Guide</h4>
+             </div>
+             <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+               Gunakan <span className="text-zinc-300 font-bold">Deep Discovery</span> untuk memperluas katalog. 
+               <span className="text-zinc-300 font-bold">Health Check</span> sangat krusial untuk menjaga kualitas user experience dengan mematikan link broken secara otomatis.
              </p>
           </div>
         </div>
@@ -314,49 +323,53 @@ export default function ScraperAdmin() {
 
       {/* Debug Console Modal */}
       {showDebug && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="glass w-full max-w-4xl max-h-[80vh] rounded-3xl border border-white/10 overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/2">
-              <div className="flex items-center gap-3">
-                <Terminal className="text-primary" />
-                <h3 className="text-xl font-black">Scraper Debug Console</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md animate-in fade-in duration-500">
+          <div className="glass w-full max-w-4xl h-[85vh] rounded-[2.5rem] border border-white/10 overflow-hidden flex flex-col shadow-[0_0_100px_rgba(0,0,0,1)]">
+            <div className="p-8 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-yellow-500 rounded-lg">
+                  <Terminal size={20} className="text-black" />
+                </div>
+                <h3 className="text-2xl font-black text-white uppercase tracking-tight">Debugger Terminal</h3>
               </div>
               <button 
                 onClick={() => setShowDebug(false)}
-                className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                className="w-10 h-10 rounded-full bg-white/5 hover:bg-red-500/20 hover:text-red-500 transition-all flex items-center justify-center"
               >
-                <XCircle className="text-gray-500 hover:text-white" size={24} />
+                <XCircle size={24} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 bg-black/40 font-mono text-sm">
-              <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-8 font-mono text-sm bg-black/40">
+              <div className="space-y-6">
                 {logs.map((log) => (
-                  <div key={log.id} className="p-4 rounded-lg bg-white/5 border border-white/5">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-primary font-bold">[{new Date(log.created_at).toLocaleTimeString()}] {log.task_name}</span>
+                  <div key={log.id} className="p-6 rounded-2xl bg-white/[0.02] border border-white/5 group hover:border-yellow-500/20 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className="text-yellow-500 font-black text-xs uppercase tracking-widest">[{new Date(log.created_at).toLocaleTimeString()}] {log.task_name}</span>
                       <StatusBadge status={log.status} />
                     </div>
                     {log.error_message ? (
-                      <div className="text-red-400 bg-red-400/5 p-3 rounded border border-red-400/10 mt-2">
-                        ERROR: {log.error_message}
+                      <div className="text-red-400 bg-red-400/5 p-4 rounded-xl border border-red-400/10 text-xs font-bold font-sans">
+                        STDOUT: {log.error_message}
                       </div>
                     ) : (
-                      <div className="text-green-400">Task completed successfully. Item processed: {log.items_count || 0}</div>
+                      <div className="text-emerald-400 text-xs font-bold">{'>>>'} Operation stream success. {log.items_count || 0} entities processed.</div>
                     )}
                     {log.summary && (
-                      <pre className="text-[10px] text-gray-500 mt-2 opacity-60">
-                        {JSON.stringify(log.summary, null, 2)}
-                      </pre>
+                      <div className="mt-4 p-4 bg-black/40 rounded-xl border border-white/5 overflow-x-auto">
+                        <pre className="text-[10px] text-zinc-500 leading-relaxed font-mono">
+                          {JSON.stringify(log.summary, null, 2)}
+                        </pre>
+                      </div>
                     )}
                   </div>
                 ))}
               </div>
             </div>
             
-            <div className="p-4 bg-white/2 border-t border-white/10 text-center">
-              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                Showing latest {logs.length} operations. Real-time updates active.
+            <div className="px-8 py-5 border-t border-white/5 bg-black/60 text-center">
+              <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[4px]">
+                Active Socket Tunnel | Real-time Stream
               </p>
             </div>
           </div>
@@ -366,30 +379,31 @@ export default function ScraperAdmin() {
   );
 }
 
-function ControlCard({ title, desc, icon, onClick, loading, color }: any) {
+function ControlCard({ title, desc, icon, onClick, loading, color, bg }: any) {
   return (
-    <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col gap-4 relative overflow-hidden group">
+    <div className="glass p-8 rounded-[2rem] border border-white/5 flex flex-col gap-6 relative overflow-hidden group shadow-lg hover:shadow-2xl transition-all duration-500">
       <div 
-        className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity"
+        className="absolute -right-8 -top-8 opacity-[0.03] group-hover:opacity-[0.1] group-hover:scale-125 transition-all duration-700 pointer-events-none"
         style={{ color }}
       >
+        {icon && typeof icon === 'object' ? <icon.type {...icon.props} size={160} /> : null}
+      </div>
+      <div className="p-4 rounded-2xl w-fit border shadow-xl transition-all duration-500 group-hover:scale-110 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.05)]" 
+           style={{ backgroundColor: bg, borderColor: `rgba(${color.match(/\d+/g)?.join(',')}, 0.2)`, color }}>
         {icon}
       </div>
-      <div className="p-3 bg-white/5 rounded-xl w-fit" style={{ color }}>
-        {icon}
-      </div>
-      <div>
-        <h3 className="text-lg font-bold text-white">{title}</h3>
-        <p className="text-sm text-gray-400 mt-1 leading-relaxed">{desc}</p>
+      <div className="flex-1">
+        <h3 className="text-xl font-black text-white group-hover:text-yellow-500 transition-colors uppercase tracking-tight leading-tight">{title}</h3>
+        <p className="text-xs text-zinc-500 mt-3 font-medium leading-relaxed group-hover:text-zinc-400 transition-colors">{desc}</p>
       </div>
       <button 
         onClick={onClick}
         disabled={loading}
-        className={`mt-4 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-          loading ? 'bg-gray-700 cursor-not-allowed' : 'bg-white text-black hover:bg-primary hover:text-white group-hover:scale-[1.02]'
+        className={`mt-4 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[2px] transition-all flex items-center justify-center gap-3 shadow-xl active:scale-95 ${
+          loading ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-white text-black hover:bg-yellow-500 group-hover:scale-[1.02]'
         }`}
       >
-        {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Jalankan Sekarang'}
+        {loading ? <RefreshCw className="animate-spin" size={16} /> : <><Play size={16} fill="currentColor" /> Run Now</>}
       </button>
     </div>
   );
@@ -398,11 +412,11 @@ function ControlCard({ title, desc, icon, onClick, loading, color }: any) {
 function StatusBadge({ status }: { status: string }) {
   const styles: any = {
     running: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-    success: 'bg-green-500/10 text-green-500 border-green-500/20',
+    success: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
     failed: 'bg-red-500/10 text-red-500 border-red-500/20',
   };
   return (
-    <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-tighter border ${styles[status]}`}>
+    <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border shadow-sm ${styles[status]}`}>
       {status}
     </span>
   );
@@ -410,14 +424,14 @@ function StatusBadge({ status }: { status: string }) {
 
 function ProviderStatus({ name, status, delay, isHealthy }: any) {
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <div className={`w-1.5 h-1.5 rounded-full ${isHealthy ? 'bg-green-500' : 'bg-red-500'}`} />
-        <span className="text-xs font-bold text-gray-300">{name}</span>
+    <div className="flex items-center justify-between group">
+      <div className="flex items-center gap-3">
+        <div className={`w-2 h-2 rounded-full shadow-sm transition-all duration-500 ${isHealthy ? 'bg-emerald-500 group-hover:shadow-emerald-500/50 group-hover:scale-125' : 'bg-red-500'}`} />
+        <span className="text-xs font-black text-zinc-400 group-hover:text-white transition-colors uppercase tracking-tight">{name}</span>
       </div>
       <div className="text-right">
-        <div className={`text-[10px] font-bold ${isHealthy ? 'text-green-500' : 'text-red-500'}`}>{status}</div>
-        <div className="text-[9px] text-gray-500">{delay}</div>
+        <div className={`text-[10px] font-black uppercase tracking-widest ${isHealthy ? 'text-emerald-500' : 'text-red-500'}`}>{status}</div>
+        <div className="text-[9px] text-zinc-600 font-bold">{delay}</div>
       </div>
     </div>
   );

@@ -60,8 +60,15 @@ export default async function RootLayout({
   const isAdminRoute = pathname.startsWith("/admin");
   const isAuthRoute = pathname === "/login" || pathname === "/register";
 
-  // Fetch all site settings once
-  const { data: settingsData } = await supabase.from("settings").select("*");
+  // ⚡ PERFORMANCE: Run ALL DB calls in parallel instead of serial waterfall
+  const [settingsResult, authResult] = await Promise.all([
+    supabase.from("settings").select("*"),
+    supabase.auth.getUser(),
+  ]);
+
+  const settingsData = settingsResult.data;
+  const user = authResult.data?.user;
+
   const siteConfig = settingsData?.find((s) => s.key === "site_config")?.value || {
     title: "Antigravity",
     primary_color: "#eab308",
@@ -69,8 +76,7 @@ export default async function RootLayout({
     maintenance_mode: false,
   };
 
-  // Auth Check for Admin
-  const { data: { user } } = await supabase.auth.getUser();
+  // Only fetch profile if user exists (conditional, not wasted)
   let isAdmin = false;
   if (user) {
     const { data: profile } = await supabase
@@ -104,7 +110,13 @@ export default async function RootLayout({
         '--navbar-text': navbarColor,
       }}
     >
-      <head />
+      <head>
+        {/* DNS Prefetch for faster external resource loading */}
+        <link rel="dns-prefetch" href="https://image.tmdb.org" />
+        <link rel="preconnect" href="https://image.tmdb.org" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://oqpubtvugpevpgflrjwv.supabase.co" />
+        <link rel="preconnect" href="https://oqpubtvugpevpgflrjwv.supabase.co" crossOrigin="anonymous" />
+      </head>
       <body className="font-sans antialiased text-gray-100 bg-[#0f0f0f] min-h-screen">
         {isAdminRoute || isAuthRoute ? (
           /* Admin/Auth routes: just render children */

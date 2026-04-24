@@ -37,7 +37,12 @@ export default async function BrowsePage({
   // Use ilike for server-side search when possible
   if (q) {
     const sanitizedQuery = q.replace(/[%_\\]/g, '\\$&');
-    query = query.ilike('title', `%${sanitizedQuery}%`);
+    // Search in title OR cast_data
+    query = query.or(`title.ilike.%${sanitizedQuery}%,cast_data.cs.[{"name":"${q}"}]`);
+    // Note: JSONB contain '@>' (cs) is more efficient than ilike in JSON but requires exact match for that specific path.
+    // For a better UX, we'll keep it simple for now or use a more complex query if needed.
+    // Actually, ilike on title is most common. To search inside JSONB array names with partial match is harder with simple OR.
+    // Let's stick to title search for now as cast_data search might be slow without proper indexing.
   }
   
   // Sort at DB level!

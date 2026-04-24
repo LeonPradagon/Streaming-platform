@@ -32,19 +32,13 @@ export async function generateMetadata(
   parent: ResolvingMetadata,
 ): Promise<Metadata> {
   const { id } = await params;
-  const { data: content } = await supabase
-    .from("contents")
-    .select("title, tmdb_id, type, overview, backdrop_path, poster_path")
-    .eq("id", id)
-    .single();
-
-  // Fetch Site Config for brand name
-  const { data: settingsData } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "site_config")
-    .single();
-  const siteConfig = settingsData?.value || { title: "NETIX" };
+  const supabaseForMeta = (await import('@/lib/supabase')).supabase;
+  const [contentResult, settingsResult] = await Promise.all([
+    supabaseForMeta.from("contents").select("title, tmdb_id, type, overview, backdrop_path, poster_path").eq("id", id).single(),
+    supabaseForMeta.from("settings").select("value").eq("key", "site_config").single(),
+  ]);
+  const content = contentResult.data;
+  const siteConfig = settingsResult.data?.value || { title: "NETIX" };
 
   if (!content) return { title: `Not Found - ${siteConfig.title}` };
 
@@ -87,18 +81,25 @@ export default async function WatchPage({ params, searchParams }: Props) {
   if (error || !content)
     return <div className="text-white p-20 text-center">Content not found</div>;
 
-  // Fetch embed links
-  const { data: links } = await supabase
-    .from("embed_links")
-    .select("*")
-    .eq("content_id", id)
-    .order("provider", { ascending: true });
+  const isMovie = content.type === "movie";
+
+  // ⚡ PERFORMANCE: Run ALL data fetches in parallel
+  const [linksResult, metadataResult, seasonsResult] = await Promise.all([
+    supabase.from("embed_links").select("*").eq("content_id", id).order("provider", { ascending: true }),
+    fetchTMDBMetadata(content.tmdb_id, !isMovie ? "tv" : "movie"),
+    !isMovie 
+      ? supabase.from("seasons").select("*").eq("content_id", id).order("season_number", { ascending: true })
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const links = linksResult.data;
+  const metadata = metadataResult;
+  const seasons = seasonsResult.data;
 
   const activeLink =
     links && links.length > currentServerIndex
       ? links[currentServerIndex]
       : links?.[0];
-  const isMovie = content.type === "movie";
 
   // Construct Final URL based on episode/season
   let finalUrl = activeLink?.url || "";
@@ -131,23 +132,11 @@ export default async function WatchPage({ params, searchParams }: Props) {
     }
   }
 
-  // Fetch TMDB metadata for details only
-  const metadata = await fetchTMDBMetadata(
-    content.tmdb_id,
-    !isMovie ? "tv" : "movie",
-  );
-
-  // Fetch Seasons from Database
-  const { data: seasons } = await supabase
-    .from("seasons")
-    .select("*")
-    .eq("content_id", id)
-    .order("season_number", { ascending: true });
 
   const activeSeason =
     seasons?.find((s) => s.season_number === currentSeason) || seasons?.[0];
 
-  // Fetch Episodes for active season from Database
+  // Fetch episodes (depends on activeSeason, so must be after)
   const { data: episodes } = activeSeason
     ? await supabase
         .from("episodes")
@@ -155,6 +144,11 @@ export default async function WatchPage({ params, searchParams }: Props) {
         .eq("season_id", activeSeason.id)
         .order("episode_number", { ascending: true })
     : { data: [] };
+
+  const nextEpisode = !isMovie && episodes?.find(ep => ep.episode_number === currentEpisode + 1);
+  const nextEpisodeUrl = nextEpisode 
+    ? `/watch/${id}?s=${currentServerIndex}&e=${nextEpisode.episode_number}&ss=${currentSeason}`
+    : undefined;
 
   return (
     <div className="min-h-screen bg-background text-foreground relative overflow-hidden animate-fade-in">
@@ -200,6 +194,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
                   mediaType={isMovie ? "movie" : "tv"}
                   season={isMovie ? undefined : currentSeason}
                   episode={isMovie ? undefined : currentEpisode}
+                  nextEpisodeUrl={nextEpisodeUrl}
                 />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-gray-500 relative">
@@ -260,7 +255,6 @@ export default async function WatchPage({ params, searchParams }: Props) {
                 ))}
               </div>
 
-              {/* Action Toolbar (functional) */}
               <WatchActions
                 item={{
                   id: String(content.id),
@@ -273,7 +267,34 @@ export default async function WatchPage({ params, searchParams }: Props) {
                 }}
               />
 
-              <div className="border-t border-white/10 pt-6">
+              {/* Cast Section */}
+              {metadata?.credits?.cast && metadata.credits.cast.length > 0 && (
+                <div className="border-t border-white/10 pt-8 mt-8">
+                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                    <Star size={20} className="text-yellow-500" /> Pemain Utama
+                  </h3>
+                  <div className="flex gap-6 overflow-x-auto pb-4 custom-scrollbar">
+                    {metadata.credits.cast.slice(0, 15).map((actor) => (
+                      <div key={actor.id} className="flex-shrink-0 w-20 md:w-24 group cursor-default">
+                        <div className="aspect-square rounded-full overflow-hidden bg-white/5 border border-white/5 group-hover:border-yellow-500/50 transition-all duration-300 relative">
+                          <img 
+                            src={actor.profile_path ? getTMDBImageUrl(actor.profile_path, 'w185') : `https://placehold.co/200x200/060d17/64748b?text=${actor.name.charAt(0)}`}
+                            alt={actor.name}
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                            loading="lazy"
+                          />
+                        </div>
+                        <div className="mt-3 text-center">
+                          <div className="text-[10px] md:text-xs font-bold text-white line-clamp-1 group-hover:text-yellow-500 transition-colors">{actor.name}</div>
+                          <div className="text-[9px] md:text-[10px] text-gray-500 line-clamp-1 mt-0.5">{actor.character}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-white/10 pt-8 mt-8">
                 <h3 className="text-xl font-bold mb-3">Sinopsis</h3>
                 <p className="text-gray-400 leading-relaxed text-lg max-w-4xl">
                   {metadata?.overview || "Sinopsis tidak tersedia."}

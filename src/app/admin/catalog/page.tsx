@@ -1,13 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { 
   Film, 
-  Search, 
-  Filter, 
   Trash2, 
   CheckCircle, 
   XCircle,
-  ExternalLink,
-  MoreVertical,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -15,7 +11,7 @@ import { deleteContent, updateContentStatus } from './actions';
 import { approveAllContent } from '../approve/actions';
 import SweetDelete from '@/components/Admin/SweetDelete';
 import SweetApprove from '@/components/Admin/SweetApprove';
-import { revalidatePath } from 'next/cache';
+import SweetEdit from './SweetEdit';
 
 import CatalogFilters from './CatalogFilters';
 
@@ -30,11 +26,11 @@ export default async function ContentCatalog({
   const typeFilter = searchParams.type || '';
   const statusFilter = searchParams.status || '';
   const page = parseInt(searchParams.page || '1');
-  const pageSize = 10;
+  const pageSize = 20;
 
   let dbQuery = supabase
     .from('contents')
-    .select('*', { count: 'exact' });
+    .select('id, title, tmdb_id, type, status, created_at, cast_data', { count: 'exact' });
 
   if (query) {
     dbQuery = dbQuery.ilike('title', `%${query}%`);
@@ -53,23 +49,15 @@ export default async function ContentCatalog({
   const totalPages = Math.ceil((count || 0) / pageSize);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '-0.5px' }}>Katalog Konten</h2>
-          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Kelola semua film dan serial yang ada di database.</p>
+          <h2 className="text-3xl font-black text-white tracking-tight">Katalog Konten</h2>
+          <p className="text-zinc-500 font-medium">Kelola semua film dan serial yang ada di database.</p>
         </div>
-        <div style={{ 
-          display: 'flex', 
-          gap: '1rem',
-          padding: '0.5rem',
-          backgroundColor: 'rgba(255,255,255,0.03)',
-          borderRadius: '1rem',
-          border: '1px solid rgba(255,255,255,0.05)',
-          alignItems: 'center'
-        }}>
+        <div className="flex gap-4 items-center bg-white/5 p-2 rounded-2xl border border-white/5 shadow-xl">
           <SweetApprove approveAllAction={approveAllContent} />
-          <span style={{ fontSize: '0.85rem', fontWeight: 700, padding: '0.5rem 1rem', borderRadius: '0.75rem', backgroundColor: '#eab308', color: '#0f172a' }}>
+          <span className="bg-yellow-500 text-black px-4 py-2 rounded-xl text-sm font-black shadow-lg shadow-yellow-500/20">
             Total: {count || 0}
           </span>
         </div>
@@ -78,129 +66,114 @@ export default async function ContentCatalog({
       <CatalogFilters query={query} type={typeFilter} status={statusFilter} />
 
       {/* Content Table */}
-      <div className="glass" style={{ borderRadius: '1.5rem', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead>
-            <tr style={{ backgroundColor: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Konten</th>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Tipe</th>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Status</th>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>TMDb ID</th>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Ditambahkan</th>
-              <th style={{ padding: '1.5rem', color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', textAlign: 'right' }}>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {contents?.map((item) => (
-              <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background-color 0.2s' }}>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div style={{ width: '40px', height: '56px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Film size={20} color="#eab308" />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{item.title}</div>
-                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>ID: {item.id.slice(0, 8)}...</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <span style={{ 
-                    padding: '0.4rem 0.8rem', 
-                    borderRadius: '2rem', 
-                    fontSize: '0.75rem', 
-                    fontWeight: 700, 
-                    backgroundColor: 'rgba(56, 189, 248, 0.1)', 
-                    color: '#38bdf8',
-                    textTransform: 'capitalize'
-                  }}>
-                    {item.type}
-                  </span>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: item.status === 'approved' ? '#10b981' : '#eab308' }} />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{item.status === 'approved' ? 'Active' : 'Pending'}</span>
-                  </div>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem', color: '#94a3b8', fontSize: '0.9rem' }}>
-                  <code style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '0.2rem 0.4rem', borderRadius: '0.25rem' }}>{item.tmdb_id}</code>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem', color: '#64748b', fontSize: '0.85rem' }}>
-                  {new Date(item.created_at).toLocaleDateString()}
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                    {item.status === 'pending' ? (
-                      <form action={async () => {
-                        'use server';
-                        await updateContentStatus(item.id, 'approved');
-                      }}>
-                        <button title="Approve" style={{ padding: '0.5rem', borderRadius: '0.5rem', border: 'none', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', cursor: 'pointer' }}>
-                          <CheckCircle size={18} />
-                        </button>
-                      </form>
-                    ) : (
-                      <form action={async () => {
-                        'use server';
-                        await updateContentStatus(item.id, 'pending');
-                      }}>
-                        <button title="Deactivate" style={{ padding: '0.5rem', borderRadius: '0.5rem', border: 'none', backgroundColor: 'rgba(234, 179, 8, 0.1)', color: '#eab308', cursor: 'pointer' }}>
-                          <XCircle size={18} />
-                        </button>
-                      </form>
-                    )}
-                    <SweetDelete 
-                      contentId={item.id} 
-                      contentTitle={item.title} 
-                      deleteAction={deleteContent} 
-                    />
-                  </div>
-                </td>
+      <div className="glass rounded-3xl overflow-hidden border border-white/5">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-white/5 border-b border-white/5">
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Konten</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Tipe</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Status</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">TMDb ID</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Ditambahkan</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest text-right">Aksi</th>
               </tr>
-            ))}
-            {(!contents || contents.length === 0) && (
-              <tr>
-                <td colSpan={6} style={{ padding: '4rem', textAlign: 'center', color: '#64748b' }}>
-                  Film tidak ditemukan. Silakan gunakan filter atau pencarian lain.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {contents?.map((item) => (
+                <tr key={item.id} className="hover:bg-white-[0.02] transition-colors group">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-14 bg-white/5 rounded-xl flex items-center justify-center shrink-0 border border-white/5 group-hover:border-yellow-500/30 transition-colors">
+                        <Film size={20} className="text-yellow-500" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">{item.title}</div>
+                        <div className="text-[10px] font-mono text-zinc-600 mt-0.5">ID: {item.id.slice(0, 8)}...</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="bg-sky-500/10 text-sky-400 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border border-sky-400/20">
+                      {item.type}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${item.status === 'approved' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-yellow-500'}`} />
+                      <span className="text-sm font-bold text-zinc-300">{item.status === 'approved' ? 'Active' : 'Pending'}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 font-mono text-xs text-zinc-500">
+                    <span className="bg-white/5 px-2 py-1 rounded border border-white/5">{item.tmdb_id}</span>
+                  </td>
+                  <td className="px-6 py-4 text-xs font-semibold text-zinc-600">
+                    {new Date(item.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex gap-2 justify-end">
+                      {item.status === 'pending' ? (
+                        <form action={async () => {
+                          'use server';
+                          await updateContentStatus(item.id, 'approved');
+                        }}>
+                          <button title="Approve" className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all border border-emerald-500/20">
+                            <CheckCircle size={18} />
+                          </button>
+                        </form>
+                      ) : (
+                        <form action={async () => {
+                          'use server';
+                          await updateContentStatus(item.id, 'pending');
+                        }}>
+                          <button title="Deactivate" className="p-2.5 rounded-xl bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500 hover:text-white transition-all border border-yellow-500/20">
+                            <XCircle size={18} />
+                          </button>
+                        </form>
+                      )}
+                      <SweetEdit content={item} />
+                      <SweetDelete 
+                        contentId={item.id} 
+                        contentTitle={item.title} 
+                        deleteAction={deleteContent} 
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {(!contents || contents.length === 0) && (
+                <tr>
+                  <td colSpan={6} className="p-12 text-center text-zinc-600 font-bold italic">
+                    Film tidak ditemukan. Silakan gunakan filter atau pencarian lain.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginTop: '1rem' }}>
+        <div className="flex justify-center items-center gap-4 py-4">
           <a 
             href={`?q=${query}&type=${typeFilter}&status=${statusFilter}&page=${Math.max(1, page - 1)}`}
-            style={{ 
-              padding: '0.75rem', 
-              borderRadius: '0.75rem', 
-              backgroundColor: 'rgba(255,255,255,0.03)', 
-              color: page === 1 ? '#475569' : 'white',
-              pointerEvents: page === 1 ? 'none' : 'auto',
-              display: 'flex',
-              alignItems: 'center'
-            }}
+            className={`p-3 rounded-2xl bg-white/5 border border-white/5 transition-all flex items-center justify-center ${
+              page === 1 ? 'opacity-30 pointer-events-none' : 'hover:bg-white/10 text-white'
+            }`}
           >
             <ChevronLeft size={20} />
           </a>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
-            <span style={{ color: '#eab308' }}>{page}</span> / <span style={{ color: '#94a3b8' }}>{totalPages}</span>
+          <div className="flex items-center gap-2 font-black text-sm">
+            <span className="text-yellow-500">{page}</span>
+            <span className="text-zinc-700">/</span>
+            <span className="text-zinc-500">{totalPages}</span>
           </div>
           <a 
             href={`?q=${query}&type=${typeFilter}&status=${statusFilter}&page=${Math.min(totalPages, page + 1)}`}
-            style={{ 
-              padding: '0.75rem', 
-              borderRadius: '0.75rem', 
-              backgroundColor: 'rgba(255,255,255,0.03)', 
-              color: page === totalPages ? '#475569' : 'white',
-              pointerEvents: page === totalPages ? 'none' : 'auto',
-              display: 'flex',
-              alignItems: 'center'
-            }}
+            className={`p-3 rounded-2xl bg-white/5 border border-white/5 transition-all flex items-center justify-center ${
+              page === totalPages ? 'opacity-30 pointer-events-none' : 'hover:bg-white/10 text-white'
+            }`}
           >
             <ChevronRight size={20} />
           </a>

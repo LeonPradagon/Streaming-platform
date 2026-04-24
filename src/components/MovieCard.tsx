@@ -11,7 +11,7 @@ interface MovieCardProps {
 }
 
 export default function MovieCard({ item, isNew, progress, rank }: MovieCardProps) {
-  const posterPath = getTMDBImageUrl(item.poster_path, 'w500');
+  const posterPath = getTMDBImageUrl(item.poster_path, 'w342');
 
   // Format rating (e.g., 8.5)
   const rating = item.vote_average ? item.vote_average.toFixed(1) : null;

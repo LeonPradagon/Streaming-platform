@@ -64,3 +64,26 @@ export async function bulkDeleteContent(ids: string[]) {
 
   return { success: false, error: error.message };
 }
+
+export async function updateContentMetadata(id: string, updates: { title: string, cast_data: any[] }) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from('contents')
+    .update({ 
+      title: updates.title,
+      cast_data: updates.cast_data,
+      updated_at: new Date().toISOString() 
+    })
+    .eq('id', id);
+
+  if (!error) {
+    await logAudit('UPDATE_CONTENT_METADATA', id, { title: updates.title });
+    revalidatePath('/admin/catalog');
+    revalidatePath(`/watch/${id}`);
+    revalidatePath('/');
+    return { success: true };
+  }
+
+  return { success: false, error: error.message };
+}

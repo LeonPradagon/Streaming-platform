@@ -9,7 +9,6 @@ import {
   Save,
   Zap,
   Info,
-  CheckCircle2,
   Palette
 } from 'lucide-react';
 import { updateSettings, purgeCache } from './actions';
@@ -20,7 +19,6 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
   initialScraperConfig: any 
 }) {
   const [isPending, startTransition] = useTransition();
-  const [success, setSuccess] = useState<string | null>(null);
 
   async function handleSaveGeneral(formData: FormData) {
     startTransition(async () => {
@@ -73,209 +71,196 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="flex flex-col gap-10">
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '2rem' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
         {/* General Settings */}
-        <section className="glass" style={{ padding: '2rem', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ padding: '0.5rem', backgroundColor: 'rgba(234, 179, 8, 0.1)', borderRadius: '0.75rem' }}>
-              <Globe size={20} color="var(--primary)" />
+        <section className="glass p-8 rounded-3xl flex flex-col gap-8 border border-white/5">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-yellow-500/10 rounded-2xl border border-yellow-500/20">
+              <Globe size={24} className="text-yellow-500" />
             </div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>Konfigurasi Umum</h3>
+            <h3 className="text-xl font-black text-white">Konfigurasi Umum</h3>
           </div>
 
-          <form action={handleSaveGeneral} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94a3b8' }}>Judul Situs</label>
+          <form action={handleSaveGeneral} className="flex flex-col gap-8">
+            <div className="flex flex-col gap-3">
+              <label className="text-xs font-black text-zinc-500 uppercase tracking-[2px]">Judul Situs</label>
               <input 
                 name="title"
                 defaultValue={initialSiteConfig.title}
-                style={{ 
-                  padding: '0.75rem 1rem', 
-                  backgroundColor: 'rgba(255,255,255,0.02)', 
-                  border: '1px solid rgba(255,255,255,0.05)', 
-                  borderRadius: '0.75rem', 
-                  color: 'white',
-                  fontSize: '0.95rem'
-                }} 
+                className="w-full px-5 py-4 bg-white/5 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-yellow-500/50 focus:bg-white/10 transition-all shadow-inner"
+                placeholder="Nama Platform Anda"
               />
             </div>
 
             {/* Color Pickers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-black text-zinc-500 uppercase tracking-[2px] flex items-center gap-2">
                   <Palette size={14} /> Warna Utama
                 </label>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div className="flex gap-4 items-center bg-white/5 p-2 rounded-2xl border border-white/5">
                   <input 
                     type="color" 
                     name="primary_color" 
                     defaultValue={initialSiteConfig.primary_color || '#eab308'}
-                    style={{ width: '40px', height: '40px', border: 'none', borderRadius: '0.5rem', backgroundColor: 'transparent', cursor: 'pointer' }}
+                    className="w-12 h-12 border-none rounded-xl bg-transparent cursor-pointer overflow-hidden p-0"
                   />
-                  <span style={{ fontSize: '0.8rem', color: '#64748b', fontFamily: 'monospace' }}>{initialSiteConfig.primary_color || '#eab308'}</span>
+                  <span className="text-xs font-mono text-zinc-400 font-bold">{initialSiteConfig.primary_color || '#eab308'}</span>
                 </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                   Warna Logo/Navbar
+              <div className="flex flex-col gap-3">
+                <label className="text-xs font-black text-zinc-500 uppercase tracking-[2px] flex items-center gap-2">
+                  <Palette size={14} /> Warna Navbar
                 </label>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div className="flex gap-4 items-center bg-white/5 p-2 rounded-2xl border border-white/5">
                   <input 
                     type="color" 
                     name="navbar_color" 
                     defaultValue={initialSiteConfig.navbar_color || '#38bdf8'}
-                    style={{ width: '40px', height: '40px', border: 'none', borderRadius: '0.5rem', backgroundColor: 'transparent', cursor: 'pointer' }}
+                    className="w-12 h-12 border-none rounded-xl bg-transparent cursor-pointer overflow-hidden p-0"
                   />
-                  <span style={{ fontSize: '0.8rem', color: '#64748b', fontFamily: 'monospace' }}>{initialSiteConfig.navbar_color || '#38bdf8'}</span>
+                  <span className="text-xs font-mono text-zinc-400 font-bold">{initialSiteConfig.navbar_color || '#38bdf8'}</span>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.05)', borderRadius: '1rem', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Mode Perawatan</div>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Matikan akses publik ke situs.</div>
+            <div className="flex items-center justify-between p-5 bg-red-500/5 rounded-2xl border border-red-500/10">
+              <div className="min-w-0">
+                <div className="font-black text-sm text-red-500 uppercase tracking-wider mb-0.5">Mode Perawatan</div>
+                <div className="text-xs text-zinc-500 font-medium">Matikan akses publik ke seluruh situs.</div>
               </div>
-              <input type="checkbox" name="maintenance" defaultChecked={initialSiteConfig.maintenance_mode} />
+              <input 
+                type="checkbox" 
+                name="maintenance" 
+                defaultChecked={initialSiteConfig.maintenance_mode}
+                className="w-6 h-6 accent-red-500 cursor-pointer"
+              />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '1rem' }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Izinkan Pendaftaran Admin</div>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Buka/tutup halaman registrasi.</div>
+            <div className="flex items-center justify-between p-5 bg-white/5 rounded-2xl border border-white/5">
+              <div className="min-w-0">
+                <div className="font-black text-sm text-white uppercase tracking-wider mb-0.5">Izinkan Pendaftaran</div>
+                <div className="text-xs text-zinc-500 font-medium">Buka/tutup akses ke halaman registrasi.</div>
               </div>
-              <input type="checkbox" name="registrations" defaultChecked={initialSiteConfig.allow_registrations} />
+              <input 
+                type="checkbox" 
+                name="registrations" 
+                defaultChecked={initialSiteConfig.allow_registrations}
+                className="w-6 h-6 accent-yellow-500 cursor-pointer"
+              />
             </div>
 
-            <button type="submit" disabled={isPending} style={{ 
-              marginTop: '1rem',
-              padding: '1rem', 
-              backgroundColor: 'var(--primary)', 
-              color: '#0f172a', 
-              border: 'none', 
-              borderRadius: '0.75rem', 
-              fontWeight: 800, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: '0.5rem',
-              cursor: isPending ? 'not-allowed' : 'pointer',
-              opacity: isPending ? 0.7 : 1
-            }}>
-              <Save size={18} /> {isPending ? 'Menyimpan...' : 'Simpan Perubahan Umum'}
+            <button 
+              type="submit" 
+              disabled={isPending} 
+              className="mt-4 w-full py-5 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-xs uppercase tracking-[2px] rounded-2xl shadow-xl shadow-yellow-500/20 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+            >
+              {isPending ? <RefreshCw size={20} className="animate-spin" /> : <Save size={20} />}
+              {isPending ? 'Menyimpan...' : 'Simpan Konfigurasi Umum'}
             </button>
           </form>
         </section>
 
         {/* System & Scraper Controls */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div className="flex flex-col gap-8">
           
-          <section className="glass" style={{ padding: '2rem', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ padding: '0.5rem', backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: '0.75rem' }}>
-                <Cpu size={20} color="#38bdf8" />
+          <section className="glass p-8 rounded-3xl flex flex-col gap-8 border border-white/5">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-sky-500/10 rounded-2xl border border-sky-500/20">
+                <Cpu size={24} className="text-sky-400" />
               </div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>Kontrol Scraper</h3>
+              <h3 className="text-xl font-black text-white">Kontrol Scraper</h3>
             </div>
 
-            <form action={handleSaveScraper} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>VideoSpider Provider</span>
-                <input type="checkbox" name="videospider" defaultChecked={initialScraperConfig.videospider_enabled} />
+            <form action={handleSaveScraper} className="flex flex-col gap-6">
+              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">VideoSpider Provider</span>
+                <input type="checkbox" name="videospider" defaultChecked={initialScraperConfig.videospider_enabled} className="w-5 h-5 accent-sky-400" />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>SuperEmbed Provider</span>
-                <input type="checkbox" name="superembed" defaultChecked={initialScraperConfig.superembed_enabled} />
+              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">SuperEmbed Provider</span>
+                <input type="checkbox" name="superembed" defaultChecked={initialScraperConfig.superembed_enabled} className="w-5 h-5 accent-sky-400" />
               </div>
 
-              <div style={{ padding: '1rem', backgroundColor: 'rgba(56, 189, 248, 0.05)', borderRadius: '1rem', border: '1px solid rgba(56, 189, 248, 0.1)', display: 'flex', gap: '0.75rem' }}>
-                <Zap size={20} color="#38bdf8" style={{ marginTop: '0.2rem' }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#38bdf8' }}>Auto-Approve Content</div>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Secara otomatis menyetujui konten hasil scraping.</div>
+              <div className="p-5 bg-sky-500/5 rounded-2xl border border-sky-500/10 flex gap-4">
+                <Zap size={24} className="text-sky-400 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-black text-sm text-sky-400 uppercase tracking-widest mb-1">Auto-Approve Content</div>
+                  <div className="text-xs text-zinc-500 font-medium leading-relaxed">Secara otomatis menyetujui konten hasil scraping tanpa review admin.</div>
                 </div>
-                <input type="checkbox" name="auto_approve" defaultChecked={initialScraperConfig.auto_approve} />
+                <input type="checkbox" name="auto_approve" defaultChecked={initialScraperConfig.auto_approve} className="w-6 h-6 accent-sky-400 cursor-pointer" />
               </div>
 
               {/* Automation Section */}
-              <div style={{ padding: '1.5rem', backgroundColor: 'rgba(139, 92, 246, 0.05)', borderRadius: '1rem', border: '1px solid rgba(139, 92, 246, 0.2)', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                   <RefreshCw size={18} color="#a78bfa" className={initialScraperConfig.auto_scrape_enabled ? 'animate-spin-slow' : ''} />
-                   <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#a78bfa' }}>Otomatisasi Scraper</div>
-                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Jalankan rutin scraping tanpa intervensi manual.</div>
+              <div className="p-6 bg-violet-500/5 rounded-2xl border border-violet-500/10 flex flex-col gap-6">
+                <div className="flex items-center gap-4">
+                   <RefreshCw size={24} className={`text-violet-400 ${initialScraperConfig.auto_scrape_enabled ? 'animate-spin-slow' : ''}`} />
+                   <div className="flex-1">
+                      <div className="font-black text-sm text-violet-400 uppercase tracking-widest mb-0.5">Otomatisasi Scraper</div>
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">Running via server-less cron</div>
                    </div>
-                   <input type="checkbox" name="auto_scrape" defaultChecked={initialScraperConfig.auto_scrape_enabled} />
+                   <input type="checkbox" name="auto_scrape" defaultChecked={initialScraperConfig.auto_scrape_enabled} className="w-6 h-6 accent-violet-400 cursor-pointer" />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '1rem' }}>
-                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>Scraper Secret Key</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Secret Key</label>
                       <input 
                         name="scraper_secret"
                         type="password"
-                        placeholder="Masukkan kode rahasia..."
+                        placeholder="••••••••"
                         defaultValue={initialScraperConfig.scraper_secret}
-                        style={{ padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.5rem', color: 'white', fontSize: '0.85rem' }} 
+                        className="w-full px-4 py-3 bg-black/40 border border-white/5 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/50 transition-all" 
                       />
                    </div>
-                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>Halaman</label>
+                   <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Discovery Pages</label>
                       <input 
                         name="discovery_pages"
                         type="number"
                         min="1"
                         max="20"
                         defaultValue={initialScraperConfig.discovery_pages || 3}
-                        style={{ padding: '0.6rem 0.8rem', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.5rem', color: 'white', fontSize: '0.85rem' }} 
+                        className="w-full px-4 py-3 bg-black/40 border border-white/5 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/50 transition-all" 
                       />
                    </div>
                 </div>
 
                 {initialScraperConfig.auto_scrape_enabled && (
-                  <div style={{ padding: '0.75rem', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '0.75rem', border: '1px dashed rgba(139, 92, 246, 0.3)' }}>
-                    <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#a78bfa', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cron Trigger URL</div>
-                    <code style={{ fontSize: '0.7rem', color: '#cbd5e1', wordBreak: 'break-all', opacity: 0.8 }}>
-                      {typeof window !== 'undefined' ? `${window.location.origin}/api/scraper/run?secret=${initialScraperConfig.scraper_secret || 'KODE_ANDA'}` : 'Loading...'}
+                  <div className="p-4 bg-black/50 rounded-xl border border-violet-500/20 border-dashed">
+                    <div className="text-[9px] font-black text-violet-400 uppercase tracking-[2px] mb-2">Cron Trigger Endpoint</div>
+                    <code className="text-[10px] text-zinc-500 font-mono break-all selection:bg-violet-500 selection:text-white">
+                      {typeof window !== 'undefined' ? `${window.location.origin}/api/scraper/run?secret=${initialScraperConfig.scraper_secret || 'YOUR_KEY'}` : 'Loading...'}
                     </code>
                   </div>
                 )}
               </div>
 
-              <button type="submit" disabled={isPending} style={{ 
-                padding: '1rem', 
-                backgroundColor: 'rgba(56, 189, 248, 0.1)', 
-                color: '#38bdf8', 
-                border: '1px solid rgba(56, 189, 248, 0.2)', 
-                borderRadius: '0.75rem', 
-                fontWeight: 800, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                gap: '0.5rem',
-                cursor: 'pointer'
-              }}>
+              <button 
+                type="submit" 
+                disabled={isPending} 
+                className="w-full py-4 bg-white/5 hover:bg-sky-500 hover:text-black border border-sky-500/20 text-sky-400 font-black text-xs uppercase tracking-widest rounded-2xl transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+              >
                 <Save size={18} /> Simpan Pengaturan Scraper
               </button>
             </form>
           </section>
 
-          <section className="glass" style={{ padding: '2rem', borderRadius: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ padding: '0.5rem', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '0.75rem' }}>
-                <Database size={20} color="#8b5cf6" />
+          <section className="glass p-8 rounded-3xl flex flex-col gap-6 border border-white/5 bg-zinc-900/20">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+                <Database size={24} className="text-zinc-400" />
               </div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>Pemeliharaan Data</h3>
+              <h3 className="text-xl font-black text-white">Pemeliharaan Data</h3>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="flex flex-col gap-4">
               <button 
                 onClick={async () => {
-                  const result = await adminAlert.confirm('Bersihkan Cache?', 'Ini akan memaksa browser & server memuat data terbaru.', 'Ya, Bersihkan');
+                  const result = await adminAlert.confirm('Bersihkan Cache?', 'Ini akan memaksa sistem memuat data terbaru dari TMDB & Provider.', 'Ya, Bersihkan');
                   if (result.isConfirmed) {
                     adminAlert.loading('Membersihkan...');
                     const res = await purgeCache();
@@ -283,28 +268,15 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
                     if (res.success) adminAlert.success('Selesai!', 'Cache global berhasil dibersihkan.');
                   }
                 }}
-                style={{ 
-                  width: '100%', 
-                  padding: '1rem', 
-                  backgroundColor: 'rgba(255,255,255,0.03)', 
-                  border: '1px solid rgba(255,255,255,0.05)', 
-                  borderRadius: '1rem', 
-                  color: 'white', 
-                  fontWeight: 700, 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  gap: '0.75rem',
-                  cursor: 'pointer'
-                }}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
               >
                 <RefreshCw size={18} /> Bersihkan Cache Global
               </button>
               
-              <div style={{ display: 'flex', gap: '0.75rem', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '1rem' }}>
-                <Info size={16} color="#64748b" style={{ flexShrink: 0 }} />
-                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>
-                  Membersihkan cache akan memaksa server untuk mengambil data terbaru dari TMDb dan Provider di setiap request.
+              <div className="flex gap-3 p-4 bg-white/[0.02] rounded-xl border border-white/5">
+                <Info size={16} className="text-zinc-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-zinc-500 font-medium leading-relaxed">
+                  Menghapus cache akan me-reset data yang tersimpan sementara di server. Berguna jika terjadi ketidaksinkronan data atau perubahan konfigurasi API yang mendadak.
                 </p>
               </div>
             </div>
