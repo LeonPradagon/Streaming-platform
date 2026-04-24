@@ -128,6 +128,28 @@ export default function ScraperAdmin() {
     }
   };
 
+  const stopTask = async () => {
+    const confirm = await adminAlert.confirm(
+      'Hentikan Paksa?', 
+      'Apakah Anda yakin ingin menghentikan paksa scraper yang sedang berjalan?',
+      'Ya, Hentikan'
+    );
+    if (!confirm.isConfirmed) return;
+
+    try {
+      adminAlert.loading('Menghentikan...', 'Mengirim sinyal abort ke server');
+      const res = await fetch('/api/scraper/stop', { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to stop scraper');
+      
+      adminAlert.success('Berhasil', 'Scraper berhasil dihentikan secara paksa.');
+      fetchLogs(); // Segera refresh log untuk melihat status 'failed'
+    } catch (err: any) {
+      adminAlert.error('Gagal', err.message);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-10 animate-fade-in">
       
@@ -199,10 +221,18 @@ export default function ScraperAdmin() {
         <div className="glass p-10 rounded-3xl border border-yellow-500/20 bg-yellow-500/5 animate-in slide-in-from-top duration-700 shadow-2xl shadow-yellow-500/5">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
             <div className="min-w-0 flex-1">
-              <h3 className="text-2xl font-black text-white flex items-center gap-3">
-                <RefreshCw className="animate-spin text-yellow-500" size={24} />
-                Executing Pipeline...
-              </h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-2xl font-black text-white flex items-center gap-3">
+                  <RefreshCw className="animate-spin text-yellow-500" size={24} />
+                  Executing Pipeline...
+                </h3>
+                <button 
+                  onClick={stopTask}
+                  className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all shadow-lg shadow-red-500/5 active:scale-95"
+                >
+                  <XCircle size={14} /> Force Stop
+                </button>
+              </div>
               <p className="text-sm text-zinc-400 mt-2 font-medium flex items-center gap-2">
                 Processing: <span className="text-yellow-500 font-black truncate max-w-[300px]">{progress.current_item || 'Scanning...'}</span>
               </p>

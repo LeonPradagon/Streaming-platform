@@ -1,25 +1,37 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Loader2, AlertCircle, RefreshCcw, ChevronRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import Link from 'next/link';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Loader2, AlertCircle, RefreshCcw, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 
 interface VideoPlayerProps {
   src: string;
   title: string;
   backdrop?: string;
   tmdbId?: number;
-  mediaType?: 'movie' | 'tv';
+  mediaType?: "movie" | "tv";
   season?: number;
   episode?: number;
   nextEpisodeUrl?: string;
 }
 
-export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, season, episode, nextEpisodeUrl }: VideoPlayerProps) {
+export default function VideoPlayer({
+  src,
+  title,
+  backdrop,
+  tmdbId,
+  mediaType,
+  season,
+  episode,
+  nextEpisodeUrl,
+}: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [subtitle, setSubtitle] = useState<{ url: string, language: string } | null>(null);
+  const [subtitle, setSubtitle] = useState<{
+    url: string;
+    language: string;
+  } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [key, setKey] = useState(0); // For forcing iframe reload
   const [showSubtitleToast, setShowSubtitleToast] = useState(false);
@@ -30,7 +42,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
     const originalOpen = window.open;
     // @ts-ignore
     window.open = function (...args) {
-      console.log('[Anti-Ad] Blocked window.open:', args);
+      console.log("[Anti-Ad] Blocked window.open:", args);
       return null;
     };
 
@@ -51,21 +63,21 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       // Some ad scripts try to redirect the parent page
     };
 
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       // @ts-ignore
       window.open = originalOpen;
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, []);
 
   const handleReload = useCallback(() => {
     setIsLoading(true);
     setHasError(false);
-    setKey(prev => prev + 1);
+    setKey((prev) => prev + 1);
   }, []);
 
   // Timeout to detect "stuck" loading
@@ -83,13 +95,18 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
     if (tmdbId) {
       const fetchSubtitle = async () => {
         try {
-          const res = await fetch(`/api/subtitles?tmdb_id=${tmdbId}&type=${mediaType || 'movie'}${season ? `&season=${season}` : ''}${episode ? `&episode=${episode}` : ''}`);
+          const res = await fetch(
+            `/api/subtitles?tmdb_id=${tmdbId}&type=${mediaType || "movie"}${season ? `&season=${season}` : ""}${episode ? `&episode=${episode}` : ""}`,
+          );
           const data = await res.json();
           if (data.url) {
-            setSubtitle({ url: data.url, language: data.language === 'id' ? 'Indonesian' : 'English' });
+            setSubtitle({
+              url: data.url,
+              language: data.language === "id" ? "Indonesian" : "English",
+            });
           }
         } catch (err) {
-          console.error('[VideoPlayer] Subtitle fetch failed:', err);
+          console.error("[VideoPlayer] Subtitle fetch failed:", err);
         }
       };
       fetchSubtitle();
@@ -102,30 +119,39 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
     const handleMessage = async (e: MessageEvent) => {
       try {
         let payload = e.data;
-        if (typeof payload === 'string') {
+        if (typeof payload === "string") {
           payload = JSON.parse(payload);
         }
 
-        if (payload?.type === 'MEDIA_DATA' && payload?.data) {
+        if (payload?.type === "MEDIA_DATA" && payload?.data) {
           const { duration, currentTime } = payload.data;
           setIsLoading(false);
-          
+
           if (currentTime > 10 && tmdbId) {
             const now = Date.now();
             if (now - lastSaveTime > 15000) {
               lastSaveTime = now;
-              const { createClient } = await import('@/lib/supabase/client');
+              const { createClient } = await import("@/lib/supabase/client");
               const supabase = createClient();
-              const { data: { session } } = await supabase.auth.getSession();
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
               if (session) {
-                const { data: content } = await supabase.from('contents').select('id').eq('tmdb_id', tmdbId).single();
+                const { data: content } = await supabase
+                  .from("contents")
+                  .select("id")
+                  .eq("tmdb_id", tmdbId)
+                  .single();
                 if (content) {
-                  await supabase.from('watch_history').upsert({
-                    user_id: session.user.id,
-                    content_id: content.id,
-                    progress_time: Math.floor(currentTime),
-                    duration: Math.floor(duration),
-                  }, { onConflict: 'user_id,content_id' });
+                  await supabase.from("watch_history").upsert(
+                    {
+                      user_id: session.user.id,
+                      content_id: content.id,
+                      progress_time: Math.floor(currentTime),
+                      duration: Math.floor(duration),
+                    },
+                    { onConflict: "user_id,content_id" },
+                  );
                 }
               }
             }
@@ -136,8 +162,8 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, [tmdbId]);
 
   // Handle subtitle toast visibility
@@ -155,37 +181,37 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
   const getFinalUrl = (url: string) => {
     try {
       const urlObj = new URL(url);
-      
-      urlObj.searchParams.set('autoplay', '1');
-      
+
+      urlObj.searchParams.set("autoplay", "1");
+
       // Comprehensive Subtitle Injection
       if (subtitle?.url) {
         // Different providers use different parameters
-        urlObj.searchParams.set('sub', subtitle.url);
-        urlObj.searchParams.set('sub.id', subtitle.url);
-        urlObj.searchParams.set('sub.label', subtitle.language);
-        urlObj.searchParams.set('subtitle', subtitle.url);
+        urlObj.searchParams.set("sub", subtitle.url);
+        urlObj.searchParams.set("sub.id", subtitle.url);
+        urlObj.searchParams.set("sub.label", subtitle.language);
+        urlObj.searchParams.set("subtitle", subtitle.url);
       }
 
       // 1. VidLink.pro Optimizations
-      if (url.includes('vidlink')) {
-        urlObj.searchParams.set('primaryColor', 'E50914');
-        urlObj.searchParams.set('secondaryColor', 'ffffff');
-        urlObj.searchParams.set('iconColor', 'ffffff');
-        urlObj.searchParams.set('ads', '0'); // Internal ad-block
-        urlObj.searchParams.set('player', 'jw'); // Use JWPlayer if possible for better performance
+      if (url.includes("vidlink")) {
+        urlObj.searchParams.set("primaryColor", "E50914");
+        urlObj.searchParams.set("secondaryColor", "ffffff");
+        urlObj.searchParams.set("iconColor", "ffffff");
+        urlObj.searchParams.set("ads", "0"); // Internal ad-block
+        urlObj.searchParams.set("player", "jw"); // Use JWPlayer if possible for better performance
       }
 
       // 2. VidSrc Optimizations
-      if (url.includes('vidsrc')) {
-        urlObj.searchParams.set('auto_play', '1');
-        urlObj.searchParams.set('color', 'E50914');
+      if (url.includes("vidsrc")) {
+        urlObj.searchParams.set("auto_play", "1");
+        urlObj.searchParams.set("color", "E50914");
       }
 
       // 3. General Anti-Ad / Tracking Parameters
-      urlObj.searchParams.set('iv_load_policy', '3'); // Disable annotations (for YT based embeds)
-      urlObj.searchParams.set('modestbranding', '1');
-      
+      urlObj.searchParams.set("iv_load_policy", "3"); // Disable annotations (for YT based embeds)
+      urlObj.searchParams.set("modestbranding", "1");
+
       return urlObj.toString();
     } catch {
       return url;
@@ -195,16 +221,16 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
   return (
     <div className="video-player-container relative w-full h-full bg-black rounded-inherit overflow-hidden group">
       <AnimatePresence>
-        <iframe 
+        <iframe
           key={key}
           ref={iframeRef}
           src={getFinalUrl(src)}
           title={title}
           className="absolute inset-0 w-full h-full border-none z-10"
-          style={{ 
-            opacity: isLoading ? 0 : 1, 
-            transition: 'opacity 0.8s ease',
-            backgroundColor: '#000'
+          style={{
+            opacity: isLoading ? 0 : 1,
+            transition: "opacity 0.8s ease",
+            backgroundColor: "#000",
           }}
           allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
           referrerPolicy="no-referrer"
@@ -219,7 +245,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       {/* Subtitle Status Toast */}
       <AnimatePresence>
         {subtitle && !isLoading && showSubtitleToast && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
@@ -236,7 +262,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       {/* Next Episode Button Overlay */}
       {nextEpisodeUrl && !isLoading && (
         <div className="absolute top-6 right-6 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <Link 
+          <Link
             href={nextEpisodeUrl}
             className="flex items-center gap-2 bg-white/10 hover:bg-white text-white hover:text-black backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 transition-all font-black text-[10px] uppercase tracking-widest shadow-2xl"
           >
@@ -248,30 +274,40 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
       {/* Loading Overlay */}
       <AnimatePresence>
         {isLoading && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]"
           >
-            <motion.div 
+            <motion.div
               className="absolute inset-0 opacity-30 bg-cover bg-center transition-transform duration-[10s]"
-              style={{ 
-                backgroundImage: backdrop ? `linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)), url(${backdrop})` : 'none',
+              style={{
+                backgroundImage: backdrop
+                  ? `linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)), url(${backdrop})`
+                  : "none",
               }}
               animate={{ scale: [1, 1.05] }}
-              transition={{ duration: 10, repeat: Infinity, repeatType: "reverse" }}
+              transition={{
+                duration: 10,
+                repeat: Infinity,
+                repeatType: "reverse",
+              }}
             />
-            
+
             <div className="relative z-10 flex flex-col items-center gap-6">
               {!hasError ? (
                 <>
                   <div className="relative">
                     <div className="absolute inset-0 bg-[#E50914] blur-2xl opacity-20 animate-pulse" />
-                    <Loader2 className="animate-spin text-[#E50914] relative z-10" size={56} strokeWidth={3} />
+                    <Loader2
+                      className="animate-spin text-[#E50914] relative z-10"
+                      size={56}
+                      strokeWidth={3}
+                    />
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <span className="text-white font-black tracking-[4px] text-xs uppercase animate-pulse">
-                      Menyiapkan Cinema...
+                      Menyiapkan Film...
                     </span>
                     <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">
                       {title}
@@ -279,7 +315,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
                   </div>
                 </>
               ) : (
-                <motion.div 
+                <motion.div
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   className="flex flex-col items-center gap-8 px-8 text-center max-w-sm"
@@ -288,12 +324,15 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
                     <AlertCircle className="text-zinc-500" size={40} />
                   </div>
                   <div className="space-y-3">
-                    <h3 className="text-white font-black text-xl tracking-tight">Koneksi Agak Lambat?</h3>
+                    <h3 className="text-white font-black text-xl tracking-tight">
+                      Koneksi Agak Lambat?
+                    </h3>
                     <p className="text-zinc-400 text-sm font-medium leading-relaxed">
-                      Beberapa server membutuhkan waktu ekstra. Coba segarkan player atau ganti server di samping.
+                      Beberapa server membutuhkan waktu ekstra. Coba segarkan
+                      player atau ganti server di samping.
                     </p>
                   </div>
-                  <button 
+                  <button
                     onClick={handleReload}
                     className="flex items-center gap-3 bg-white text-black px-10 py-4 rounded-full font-black text-sm hover:scale-105 transition-all active:scale-95 shadow-xl"
                   >
