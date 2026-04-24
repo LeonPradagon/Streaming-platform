@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Play, Star, ChevronLeft, ChevronRight } from "lucide-react";
 import Image from "next/image";
+import { motion } from "framer-motion";
 import { getTMDBImageUrl } from "@/lib/tmdb";
 
 interface HeroCarouselProps {
@@ -27,10 +28,10 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
   if (!items || items.length === 0) return null;
 
   const currentItem = items[currentIndex];
-  
+
   const backdropUrl = getTMDBImageUrl(
     currentItem.metadata?.backdrop_path || currentItem.metadata?.poster_path,
-    'w1280'
+    "w1280",
   );
 
   const rating = currentItem.metadata?.vote_average
@@ -107,7 +108,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
               <Play size={16} fill="currentColor" /> Watch Now
             </Link>
           </div>
-          
+
           {/* Indicators */}
           <div className="flex items-center gap-2 mt-6">
             {items.map((_, idx) => (
@@ -115,31 +116,20 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
                 key={idx}
                 onClick={() => setCurrentIndex(idx)}
                 aria-label={`Go to slide ${idx + 1}`}
-                className={`transition-all duration-300 h-1.5 rounded-full ${
-                  idx === currentIndex
-                    ? "w-6 bg-[#E50914]"
-                    : "w-1.5 bg-gray-500 hover:bg-gray-400"
-                }`}
-              />
+                className="relative h-1.5 rounded-full overflow-hidden bg-white/20 hover:bg-white/40 transition-all duration-500"
+                style={{ width: idx === currentIndex ? "40px" : "8px" }}
+              >
+                {idx === currentIndex && (
+                  <motion.div 
+                    key={`indicator-${currentIndex}`}
+                    initial={{ width: "0%" }}
+                    animate={{ width: "100%" }}
+                    transition={{ duration: 5, ease: "linear" }}
+                    className="absolute inset-y-0 left-0 bg-[#E50914]"
+                  />
+                )}
+              </button>
             ))}
-          </div>
-
-          {/* Arrow Controls */}
-          <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity z-30 pointer-events-none">
-            <button 
-              onClick={() => setCurrentIndex(prev => (prev === 0 ? items.length - 1 : prev - 1))}
-              aria-label="Previous slide"
-              className="p-4 rounded-full bg-black/20 backdrop-blur-md border border-white/5 text-white pointer-events-auto hover:bg-[#E50914] transition-colors"
-            >
-              <ChevronLeft size={24} />
-            </button>
-            <button 
-              onClick={() => setCurrentIndex(prev => (prev === items.length - 1 ? 0 : prev + 1))}
-              aria-label="Next slide"
-              className="p-4 rounded-full bg-black/20 backdrop-blur-md border border-white/5 text-white pointer-events-auto hover:bg-[#E50914] transition-colors"
-            >
-              <ChevronRight size={24} />
-            </button>
           </div>
         </div>
       </div>
@@ -148,18 +138,11 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
         const isNext = idx === (currentIndex + 1) % items.length;
         const isPrev = idx === (currentIndex - 1 + items.length) % items.length;
         if (isNext || isPrev) {
-           const preloadUrl = getTMDBImageUrl(
-             item.metadata?.backdrop_path || item.metadata?.poster_path || "",
-             "w1280"
-           );
-           return (
-             <link 
-               key={idx} 
-               rel="prefetch" 
-               href={preloadUrl} 
-               as="image" 
-             />
-           );
+          const preloadUrl = getTMDBImageUrl(
+            item.metadata?.backdrop_path || item.metadata?.poster_path || "",
+            "w1280",
+          );
+          return <link key={idx} rel="prefetch" href={preloadUrl} as="image" />;
         }
         return null;
       })}

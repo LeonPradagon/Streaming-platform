@@ -22,6 +22,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
   const [subtitle, setSubtitle] = useState<{ url: string, language: string } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [key, setKey] = useState(0); // For forcing iframe reload
+  const [showSubtitleToast, setShowSubtitleToast] = useState(false);
 
   // --- AD BLOCKING LOGIC (Invisible) ---
   useEffect(() => {
@@ -139,6 +140,17 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
     return () => window.removeEventListener('message', handleMessage);
   }, [tmdbId]);
 
+  // Handle subtitle toast visibility
+  useEffect(() => {
+    if (!isLoading && subtitle) {
+      setShowSubtitleToast(true);
+      const timer = setTimeout(() => {
+        setShowSubtitleToast(false);
+      }, 5000); // Hide after 5 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, subtitle]);
+
   // Build final iframe URL with anti-ad params and subtitles
   const getFinalUrl = (url: string) => {
     try {
@@ -206,7 +218,7 @@ export default function VideoPlayer({ src, title, backdrop, tmdbId, mediaType, s
 
       {/* Subtitle Status Toast */}
       <AnimatePresence>
-        {subtitle && !isLoading && (
+        {subtitle && !isLoading && showSubtitleToast && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

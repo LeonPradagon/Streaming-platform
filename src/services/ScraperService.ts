@@ -30,9 +30,9 @@ export class ScraperService {
   }
 
   /**
-   * Helper to run tasks in parallel with a concurrency limit
+   * Helper to run tasks in parallel with a concurrency limit and optional abort check
    */
-  private async pMap<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
+  private async pMap<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency: number, abortCheck?: () => Promise<void>): Promise<R[]> {
     const results: R[] = [];
     const chunks = [];
     for (let i = 0; i < items.length; i += concurrency) {
@@ -40,6 +40,7 @@ export class ScraperService {
     }
 
     for (const chunk of chunks) {
+      if (abortCheck) await abortCheck();
       const chunkResults = await Promise.all(chunk.map(item => mapper(item)));
       results.push(...chunkResults);
       // Small breathing room between chunks
@@ -84,21 +85,30 @@ export class ScraperService {
    * Cleanup tasks that have been 'running' for more than 10 minutes
    */
   private async cleanupStaleTasks() {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const sixtyMinutesAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     
-    const { error } = await supabase
+    // 1. Get stale tasks from DB
+    const { data: staleTasks } = await supabase
       .from('scraper_logs')
-      .update({ 
-        status: 'failed', 
-        error_message: 'Task timed out (stale task auto-cleanup)' 
-      })
+      .select('task_name')
       .eq('status', 'running')
-      .lt('created_at', tenMinutesAgo);
+      .lt('created_at', sixtyMinutesAgo);
 
-    if (error) console.error('[Scraper] Error cleaning up stale tasks:', error.message);
-    
-    // Also clear memory set
-    ScraperService.activeTasks.clear();
+    if (staleTasks && staleTasks.length > 0) {
+      console.log(`[Scraper] Cleaning up ${staleTasks.length} stale tasks...`);
+      for (const t of staleTasks) {
+        ScraperService.activeTasks.delete(t.task_name);
+      }
+
+      await supabase
+        .from('scraper_logs')
+        .update({ 
+          status: 'failed', 
+          error_message: 'Task timed out (stale task auto-cleanup 60m)' 
+        })
+        .eq('status', 'running')
+        .lt('created_at', sixtyMinutesAgo);
+    }
   }
 
   /**
@@ -115,6 +125,19 @@ export class ScraperService {
     }
     
     ScraperService.activeTasks.add(taskName);
+
+    // 3. Check DB for any 'running' task with same name that isn't stale (within 60m)
+    const { data: existingRunning } = await supabase
+      .from('scraper_logs')
+      .select('id')
+      .eq('task_name', taskName)
+      .eq('status', 'running')
+      .single();
+
+    if (existingRunning) {
+      console.warn(`[Scraper] Task ${taskName} is already marked as running in DB. Skipping.`);
+      return null;
+    }
 
     const { data, error } = await supabase
       .from('scraper_logs')
@@ -166,6 +189,18 @@ export class ScraperService {
   }
 
   /**
+   * Check if task is still running in the DB to allow graceful abortion
+   */
+  private async checkTaskActive(logId?: string) {
+    if (!logId) return;
+    const { data: currentLog } = await supabase.from('scraper_logs').select('status').eq('id', logId).single();
+    if (currentLog && currentLog.status !== 'running') {
+      console.warn(`[Scraper] Task ${logId} is cancelled. Aborting.`);
+      throw new Error('Task Aborted');
+    }
+  }
+
+  /**
    * Fetch current scraper configuration from DB
    */
   private async getScraperConfig() {
@@ -207,8 +242,17 @@ export class ScraperService {
   /**
    * Deep Scrape TV Series Details (Seasons & Episodes)
    */
-  private async scrapeTVDetails(contentId: string, tmdbId: number) {
+  private async scrapeTVDetails(contentId: string, tmdbId: number, logId?: string, currentProcessed?: number, totalEstimated?: number, showTitle?: string) {
     try {
+      // 0. Check if task is still active in DB if logId is provided
+      if (logId) {
+        const { data: currentLog } = await supabase.from('scraper_logs').select('status').eq('id', logId).single();
+        if (currentLog?.status !== 'running') {
+           console.log(`[Scraper] Task ${logId} is no longer running. Aborting TV details.`);
+           return;
+        }
+      }
+
       const res = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbApiKey}`);
       const data = await res.json();
 
@@ -238,7 +282,13 @@ export class ScraperService {
         const sData = await sRes.json();
 
         if (sData.episodes) {
-          for (const ep of sData.episodes) {
+          const epCount = sData.episodes.length;
+          for (const [epIdx, ep] of sData.episodes.entries()) {
+            // Update progress for each episode if it's a long season
+            if (logId && (epIdx % 5 === 0)) {
+               await this.updateLogProgress(logId, currentProcessed || 0, totalEstimated || 0, `${showTitle} - S${seasonItem.season_number}E${ep.episode_number}`);
+            }
+
             // Episode Smart Skip: Check if episode already exists
             const { data: existingEp } = await supabase
               .from('episodes')
@@ -291,20 +341,13 @@ export class ScraperService {
     
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    // Internal Safety Timeout (9 minutes) to prevent getting stuck if platform kills process
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Internal Scraper Timeout (9 mins reached)')), 9 * 60 * 1000)
-    );
-
     try {
-      await Promise.race([
-        this.executeDiscovery(pagesPerGenre, logId, summary),
-        timeoutPromise
-      ]);
-      
+      await this.executeDiscovery(pagesPerGenre, logId, summary);
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
       console.error("Discovery error:", err);
+      // If manually aborted, don't write generic error, keep status
+      if (err.message === 'Task Aborted') return summary; 
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
@@ -339,6 +382,8 @@ export class ScraperService {
       console.log(`🔍 Scraping Genre: ${genre.name} (${genre.type}) | Pages ${startPage}-${endPage}`);
 
       for (let page = startPage; page <= endPage; page++) {
+        await this.checkTaskActive(logId);
+        
         const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${page}`;
         const res = await this.fetchWithTimeout(url);
         const data = await res.json();
@@ -394,7 +439,8 @@ export class ScraperService {
             if (genre.type === 'tv') {
               const shouldScrapeDetails = !existing || (metadata.last_air_date && existing.last_air_date !== metadata.last_air_date);
               if (shouldScrapeDetails) {
-                await this.scrapeTVDetails(dbItem.id, item.id);
+                const totalEstimated = allTasks.length * pagesPerGenre * 20;
+                await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, totalEstimated, item.title || item.name);
               }
             }
             
@@ -410,7 +456,7 @@ export class ScraperService {
             summary.items_failed++;
             summary.errors.push(`${item.title || item.id}: ${err.message}`);
           }
-        }, 3);
+        }, 3, () => this.checkTaskActive(logId));
 
         progress[key] = page + 1;
         await this.updateScraperProgress(progress);
@@ -428,19 +474,12 @@ export class ScraperService {
 
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Internal Trending Timeout (9 mins reached)')), 9 * 60 * 1000)
-    );
-
     try {
-      await Promise.race([
-        this.executeTrending(logId, summary),
-        timeoutPromise
-      ]);
-      
+      await this.executeTrending(logId, summary);
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
       console.error("Trending error:", err);
+      if (err.message === 'Task Aborted') return summary;
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
     return summary;
@@ -504,7 +543,7 @@ export class ScraperService {
           if (item.media_type === 'tv') {
             const shouldScrapeDetails = !existing || (metadata.last_air_date && existing.last_air_date !== metadata.last_air_date);
             if (shouldScrapeDetails) {
-              await this.scrapeTVDetails(dbItem.id, item.id);
+              await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, data.results.length, item.title || item.name);
             }
           }
           
@@ -514,7 +553,7 @@ export class ScraperService {
         } catch (err: any) {
           summary.items_failed++;
         }
-      }, 3);
+      }, 3, () => this.checkTaskActive(logId));
     }
   }
 
@@ -565,10 +604,11 @@ export class ScraperService {
           } catch (err: any) {
             summary.items_failed++;
           }
-        }, 5);
+        }, 5, () => this.checkTaskActive(logId));
       }
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
+      if (err.message === 'Task Aborted') return summary;
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
@@ -585,19 +625,12 @@ export class ScraperService {
 
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Internal Sync Timeout (9 mins reached)')), 9 * 60 * 1000)
-    );
-
     try {
-      await Promise.race([
-        this.executeSyncAllMetadata(logId, summary),
-        timeoutPromise
-      ]);
-      
+      await this.executeSyncAllMetadata(logId, summary);
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
       console.error("Sync error:", err);
+      if (err.message === 'Task Aborted') return summary;
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
@@ -637,14 +670,14 @@ export class ScraperService {
           }
 
           if (tmdbType !== 'movie') {
-            await this.scrapeTVDetails(item.id, item.tmdb_id);
+            await this.scrapeTVDetails(item.id, item.tmdb_id, logId, summary.items_processed, contents.length, item.title);
           }
           
           summary.items_added++;
         } catch (err: any) {
           summary.items_failed++;
         }
-      }, 3);
+      }, 3, () => this.checkTaskActive(logId));
     }
   }
 
@@ -679,10 +712,11 @@ export class ScraperService {
           } catch (err: any) {
             summary.items_failed++;
           }
-        }, 5);
+        }, 5, () => this.checkTaskActive(logId));
       }
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
+      if (err.message === 'Task Aborted') return summary;
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
