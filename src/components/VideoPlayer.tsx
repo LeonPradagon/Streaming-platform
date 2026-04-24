@@ -86,7 +86,17 @@ export default function VideoPlayer({
       const timer = setTimeout(() => {
         setHasError(true);
       }, 25000); // 25 seconds timeout
-      return () => clearTimeout(timer);
+
+      // Secondary faster timeout to just show the iframe even if onLoad didn't fire
+      // Some providers don't trigger onLoad correctly in all browsers
+      const fallbackTimer = setTimeout(() => {
+        setIsLoading(false);
+      }, 10000);
+
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(fallbackTimer);
+      };
     }
   }, [isLoading]);
 
@@ -199,7 +209,6 @@ export default function VideoPlayer({
         urlObj.searchParams.set("secondaryColor", "ffffff");
         urlObj.searchParams.set("iconColor", "ffffff");
         urlObj.searchParams.set("ads", "0"); // Internal ad-block
-        urlObj.searchParams.set("player", "jw"); // Use JWPlayer if possible for better performance
       }
 
       // 2. VidSrc Optimizations
@@ -235,8 +244,8 @@ export default function VideoPlayer({
           allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
           referrerPolicy="no-referrer"
           onLoad={() => {
-            // Give it a bit more time for the provider's internal loading
-            setTimeout(() => setIsLoading(false), 2000);
+            // Reduced delay to show the player faster
+            setTimeout(() => setIsLoading(false), 500);
           }}
           allowFullScreen
         />
