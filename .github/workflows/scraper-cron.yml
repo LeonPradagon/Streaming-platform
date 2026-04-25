@@ -1,27 +1,23 @@
-name: Automated Content Scraper
+name: Automated Content Scraper (Chunked)
 
 on:
   schedule:
-    # Berjalan setiap hari jam 02:00 AM WIB (19:00 UTC)
-    - cron: "0 19 * * *"
+    # Berjalan setiap 15 menit agar chunking terus berlanjut sepanjang hari
+    - cron: "*/15 * * * *"
   workflow_dispatch:
-    # Memungkinkan trigger manual dari tab Actions di GitHub
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Scraper API
+      - name: Trigger Scraper API Chunk
         run: |
-          # Clean URL (remove https:// or trailing slash if present)
+          # Ambil base URL, hilangkan https:// dan trailing slash jika ada
           CLEAN_URL=$(echo "${{ secrets.SITE_URL }}" | sed -e 's|^https://||' -e 's|/$||')
           
-          echo "Triggering scraper at https://$CLEAN_URL/api/scraper/run"
+          echo "Triggering scraper chunk at https://$CLEAN_URL/api/scraper/run"
           
-          # Trigger API using GET with URL-encoded secret
-          # -s: silent
-          # -f: fail on 4xx/5xx
-          # -G: use GET (params in data-urlencode will be appended to URL)
-          curl -s -f -G \
-            --data-urlencode "secret=${{ secrets.SCRAPER_SECRET }}" \
-            "https://$CLEAN_URL/api/scraper/run"
+          # Gunakan GET untuk memicu 1 chunk per pemanggilan.
+          # Sistem akan membaca state terakhir dari database secara otomatis.
+          curl -s -f "https://$CLEAN_URL/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}&task=scrape"
+
