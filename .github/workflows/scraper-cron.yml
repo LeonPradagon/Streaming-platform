@@ -13,6 +13,15 @@ jobs:
     steps:
       - name: Trigger Scraper API
         run: |
-          # Menggunakan -f agar build GitHub gagal jika website membalas dengan error (401/403/500)
-          # Menggunakan -s untuk menyembunyikan progress bar yang tidak perlu
-          curl -s -f -X GET "https://${{ secrets.SITE_URL }}/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}"
+          # Clean URL (remove https:// or trailing slash if present)
+          CLEAN_URL=$(echo "${{ secrets.SITE_URL }}" | sed -e 's|^https://||' -e 's|/$||')
+          
+          echo "Triggering scraper at https://$CLEAN_URL/api/scraper/run"
+          
+          # Trigger API using GET with URL-encoded secret
+          # -s: silent
+          # -f: fail on 4xx/5xx
+          # -G: use GET (params in data-urlencode will be appended to URL)
+          curl -s -f -G \
+            --data-urlencode "secret=${{ secrets.SCRAPER_SECRET }}" \
+            "https://$CLEAN_URL/api/scraper/run"

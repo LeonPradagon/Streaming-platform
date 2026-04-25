@@ -51,29 +51,52 @@ export async function POST(req: Request) {
 
 // GET handler for simple Vercel Cron hits (triggers full routine)
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get('secret');
-  
-  const supabase = await createClient();
-  const { data: sData } = await supabase.from('settings').select('value').eq('key', 'scraper_config').single();
-  const scraperConfig = sData?.value || {};
+  try {
+    const { searchParams } = new URL(req.url);
+    const secret = searchParams.get('secret');
+    
+    const supabase = await createClient();
+    const { data: sData, error: sError } = await supabase.from('settings').select('value').eq('key', 'scraper_config').single();
+    
+    if (sError && sError.code !== 'PGRST116') {
+      console.error('[Scraper API] Database error fetching config:', sError);
+    }
 
-  const validSecret = scraperConfig.scraper_secret || process.env.SCRAPER_SECRET;
-  
-  if (!validSecret || secret !== validSecret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const scraperConfig = sData?.value || {};
+    const validSecret = scraperConfig.scraper_secret || process.env.SCRAPER_SECRET;
+    
+    if (!validSecret) {
+      console.error('[Scraper API] No secret configured in DB or Env.');
+      return NextResponse.json({ error: 'Server configuration error: SCRAPER_SECRET is not set' }, { status: 500 });
+    }
+
+    if (secret !== validSecret) {
+      console.warn('[Scraper API] Unauthorized access attempt with invalid secret.');
+      return NextResponse.json({ error: 'Unauthorized: Invalid secret' }, { status: 401 });
+    }
+
+    // Check if automation is enabled in DB
+    if (scraperConfig.auto_scrape_enabled === false) {
+      console.warn('[Scraper API] Automation hit but it is disabled in settings.');
+      return NextResponse.json({ error: 'Forbidden: Automation is disabled in settings' }, { status: 403 });
+    }
+
+    const scraper = ScraperService.getInstance();
+    const intensity = scraperConfig.discovery_pages || 5;
+    
+    // Full routine: Trending + Discovery (with intensity from settings)
+    console.log(`[Scraper API] Triggering full routine via CRON (Intensity: ${intensity})`);
+    scraper.runFullRoutine(intensity).catch(err => {
+      console.error('[Scraper API] Background routine error:', err);
+    });
+    
+    return NextResponse.json({ 
+      status: 'Full routine triggered in background', 
+      intensity,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('[Scraper API] GET Handler Exception:', err);
+    return NextResponse.json({ error: 'Internal Server Error', message: err.message }, { status: 500 });
   }
-
-  // Check if automation is enabled in DB
-  if (scraperConfig.auto_scrape_enabled === false) {
-    return NextResponse.json({ error: 'Automation is disabled in settings' }, { status: 403 });
-  }
-
-  const scraper = ScraperService.getInstance();
-  const intensity = scraperConfig.discovery_pages || 5;
-  
-  // Full routine: Trending + Discovery (with intensity from settings)
-  scraper.runFullRoutine(intensity).catch(console.error);
-  
-  return NextResponse.json({ status: 'Full routine triggered in background', intensity });
 }
