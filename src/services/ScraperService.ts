@@ -942,7 +942,7 @@ export class ScraperService {
     }
 
     const offset = state.offset || 0;
-    const chunkSize = 10;
+    const chunkSize = 3; // Reduced for Vercel
     const chunk = contents.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
@@ -969,7 +969,7 @@ export class ScraperService {
       } catch (err) {
         summary.items_failed++;
       }
-    }, 3);
+    }, 1);
 
     const nextOffset = offset + chunkSize;
     const hasMore = nextOffset < contents.length;
@@ -987,7 +987,7 @@ export class ScraperService {
     }
 
     const offset = state.offset || 0;
-    const chunkSize = 10;
+    const chunkSize = 5;
     const chunk = contents.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
@@ -1001,7 +1001,7 @@ export class ScraperService {
       } catch (err) {
         summary.items_failed++;
       }
-    }, 5);
+    }, 1);
 
     const nextOffset = offset + chunkSize;
     const hasMore = nextOffset < contents.length;
