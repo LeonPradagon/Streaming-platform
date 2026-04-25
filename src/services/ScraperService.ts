@@ -110,7 +110,7 @@ export class ScraperService {
   /**
    * Log an event to the database
    */
-  private async createLog(taskName: string) {
+  public async createLog(taskName: string) {
     // 1. Always cleanup stale tasks first to avoid getting stuck
     await this.cleanupStaleTasks();
 
@@ -140,7 +140,7 @@ export class ScraperService {
     return data?.id;
   }
 
-  private async updateLog(logId: string, status: 'success' | 'failed', summary: ScrapeTaskSummary, errorMessage?: string) {
+  public async updateLog(logId: string, status: 'success' | 'failed', summary: ScrapeTaskSummary, errorMessage?: string) {
     try {
       await supabase
         .from('scraper_logs')
@@ -158,7 +158,7 @@ export class ScraperService {
     }
   }
 
-  private async updateLogProgress(logId: string, current: number, total: number, currentItem: string) {
+  public async updateLogProgress(logId: string, current: number, total: number, currentItem: string) {
     try {
       await supabase
         .from('scraper_logs')
@@ -731,5 +731,294 @@ export class ScraperService {
         quality: 'HD'
       }, { onConflict: 'content_id,provider' });
     }
+  }
+
+  // ==========================================
+  // CHUNKED EXECUTION FOR SERVERLESS (NETLIFY)
+  // ==========================================
+
+  public async runDiscoveryChunk(pagesPerGenre: number = 3, state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const scraperConfig = await this.getScraperConfig();
+    
+    // Fetch genres if not in state
+    let allTasks = state.genres;
+    if (!allTasks) {
+      const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
+      const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
+      const { genres: movieGenres } = await movieGenreRes.json();
+      const { genres: tvGenres } = await tvGenreRes.json();
+      
+      if (!movieGenres || !tvGenres) throw new Error("Failed to fetch genres from TMDB");
+      
+      allTasks = [
+        ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
+        ...tvGenres.map((g: any) => ({ ...g, type: 'tv' }))
+      ];
+    }
+
+    const currentGenreIndex = state.currentGenreIndex || 0;
+    const currentPage = state.currentPage || 1;
+
+    if (currentGenreIndex >= allTasks.length) {
+      return { summary, hasMore: false, total: 0, nextState: {} };
+    }
+
+    const genre = allTasks[currentGenreIndex];
+    console.log(`[Chunk] Scraping Genre: ${genre.name} (${genre.type}) | Page ${currentPage}`);
+
+    const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${currentPage}`;
+    const res = await this.fetchWithTimeout(url);
+    const data = await res.json();
+
+    if (data.results && data.results.length > 0) {
+      // Process items sequentially to avoid memory spikes, but we can do small batches
+      await this.pMap(data.results, async (item: any) => {
+        summary.items_processed++;
+        const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
+        if (existing && genre.type === 'movie') return;
+
+        try {
+          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+          if (!resMetadata.ok) throw new Error(`Fetch failed`);
+          const metadata: any = await resMetadata.json();
+          
+          const finalType = classifyContentType(metadata, genre.type as any);
+          const platform = classifyPlatform(metadata, finalType);
+          const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
+          
+          const { data: dbItem } = await supabase.from('contents').upsert({
+            tmdb_id: item.id,
+            title: item.title || item.name,
+            type: finalType,
+            status: scraperConfig.auto_approve ? 'approved' : 'pending',
+            platform,
+            cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+            genre_names: genreNames,
+            overview: metadata.overview,
+            poster_path: metadata.poster_path,
+            backdrop_path: metadata.backdrop_path,
+            vote_average: metadata.vote_average,
+            popularity: item.popularity || metadata.popularity || 0,
+            release_date: metadata.release_date || metadata.first_air_date,
+            is_healthy: true
+          }, { onConflict: 'tmdb_id' }).select().single();
+
+          if (dbItem) {
+            await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
+            if (genre.type === 'tv') {
+              await this.scrapeTVDetails(dbItem.id, item.id);
+            }
+            await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+            summary.items_added++;
+          }
+        } catch (err: any) {
+          summary.items_failed++;
+        }
+      }, 5); // 5 concurrent for speed
+    }
+
+    // Determine next state
+    let nextGenreIndex = currentGenreIndex;
+    let nextPage = currentPage + 1;
+
+    if (nextPage > pagesPerGenre || !data.results || data.results.length === 0) {
+      nextGenreIndex++;
+      nextPage = 1;
+    }
+
+    const hasMore = nextGenreIndex < allTasks.length;
+    
+    const total = allTasks.length * pagesPerGenre * 20;
+
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { genres: allTasks, currentGenreIndex: nextGenreIndex, currentPage: nextPage } : {}
+    };
+  }
+
+  public async runTrendingChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const scraperConfig = await this.getScraperConfig();
+    
+    let items = state.items;
+    if (!items) {
+      const res = await this.fetchWithTimeout(`https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`);
+      const data = await res.json();
+      items = data.results?.filter((i: any) => i.media_type === 'movie' || i.media_type === 'tv') || [];
+    }
+
+    const offset = state.offset || 0;
+    const chunkSize = 5; // Process 5 items per chunk
+    const chunk = items.slice(offset, offset + chunkSize);
+
+    if (chunk.length === 0) {
+      return { summary, hasMore: false, total: 0, nextState: {} };
+    }
+
+    await this.pMap(chunk, async (item: any) => {
+      summary.items_processed++;
+      try {
+        const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
+        const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+        const metadata: any = await resMetadata.json();
+        
+        const finalType = classifyContentType(metadata, item.media_type as any);
+        const platform = classifyPlatform(metadata, finalType);
+        
+        const { data: dbItem } = await supabase.from('contents').upsert({
+          tmdb_id: item.id,
+          title: item.title || item.name,
+          type: finalType,
+          status: scraperConfig.auto_approve ? 'approved' : 'pending',
+          platform,
+          cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+          genre_names: metadata.genres?.map((g: any) => g.name) || [],
+          overview: metadata.overview,
+          poster_path: metadata.poster_path,
+          backdrop_path: metadata.backdrop_path,
+          vote_average: metadata.vote_average,
+          popularity: item.popularity || metadata.popularity || 0,
+          release_date: metadata.release_date || metadata.first_air_date,
+          is_healthy: true
+        }, { onConflict: 'tmdb_id' }).select().single();
+
+        if (dbItem) {
+          await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
+          if (item.media_type === 'tv') await this.scrapeTVDetails(dbItem.id, item.id);
+          await SubtitleService.fetchAndUploadSubtitle(item.id, finalType as 'movie' | 'tv');
+          summary.items_added++;
+        }
+      } catch (err) {
+        summary.items_failed++;
+      }
+    }, 3);
+
+    const nextOffset = offset + chunkSize;
+    const hasMore = nextOffset < items.length;
+
+    const total = items.length;
+
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { items, offset: nextOffset } : {}
+    };
+  }
+
+  public async runHealthCheckChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    
+    let links = state.links;
+    if (!links) {
+      const { data } = await supabase.from('embed_links').select('id, url, content_id');
+      links = data || [];
+    }
+
+    const offset = state.offset || 0;
+    const chunkSize = 15; // 15 links per chunk
+    const chunk = links.slice(offset, offset + chunkSize);
+
+    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+
+    await this.pMap(chunk, async (link: any) => {
+      summary.items_processed++;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000); 
+        const res = await fetch(link.url, { method: 'GET', signal: controller.signal, headers: { 'Range': 'bytes=0-0' } });
+        clearTimeout(timeout);
+        const isHealthy = res.ok || res.status === 403 || res.status === 206; 
+        await supabase.from('contents').update({ is_healthy: isHealthy, last_checked_at: new Date().toISOString() }).eq('id', link.content_id);
+      } catch (err) {
+        summary.items_failed++;
+      }
+    }, 5);
+
+    const nextOffset = offset + chunkSize;
+    const hasMore = nextOffset < links.length;
+
+    const total = links.length;
+    return { summary, hasMore, total, nextState: hasMore ? { links, offset: nextOffset } : {} };
+  }
+
+  public async runSyncMetadataChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    
+    let contents = state.contents;
+    if (!contents) {
+      const { data } = await supabase.from('contents').select('id, tmdb_id, type');
+      contents = data || [];
+    }
+
+    const offset = state.offset || 0;
+    const chunkSize = 10;
+    const chunk = contents.slice(offset, offset + chunkSize);
+
+    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+
+    await this.pMap(chunk, async (item: any) => {
+      summary.items_processed++;
+      try {
+        const tmdbType = item.type === 'movie' ? 'movie' : 'tv';
+        const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+        const metadata: any = await resMetadata.json();
+        
+        await supabase.from('contents').update({
+          genre_names: metadata.genres?.map((g: any) => g.name) || [],
+          cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+          overview: metadata.overview,
+          poster_path: metadata.poster_path,
+          backdrop_path: metadata.backdrop_path,
+          vote_average: metadata.vote_average,
+          release_date: metadata.release_date || metadata.first_air_date
+        }).eq('id', item.id);
+
+        if (tmdbType === 'tv') await this.scrapeTVDetails(item.id, item.tmdb_id);
+        summary.items_added++;
+      } catch (err) {
+        summary.items_failed++;
+      }
+    }, 3);
+
+    const nextOffset = offset + chunkSize;
+    const hasMore = nextOffset < contents.length;
+    const total = contents.length;
+    return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };
+  }
+
+  public async runSyncSubtitlesChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    
+    let contents = state.contents;
+    if (!contents) {
+      const { data } = await supabase.from('contents').select('tmdb_id, type');
+      contents = data || [];
+    }
+
+    const offset = state.offset || 0;
+    const chunkSize = 10;
+    const chunk = contents.slice(offset, offset + chunkSize);
+
+    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+
+    await this.pMap(chunk, async (item: any) => {
+      summary.items_processed++;
+      try {
+        const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
+        if (result.status === 'success') summary.items_added++;
+        else summary.items_failed++;
+      } catch (err) {
+        summary.items_failed++;
+      }
+    }, 5);
+
+    const nextOffset = offset + chunkSize;
+    const hasMore = nextOffset < contents.length;
+    const total = contents.length;
+    return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };
   }
 }

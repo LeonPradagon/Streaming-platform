@@ -94,7 +94,7 @@ export default function ScraperAdmin() {
     
     const confirm = await adminAlert.confirm(
       'Konfirmasi Tugas', 
-      `Jalankan ${taskType}? Proses ini berjalan di background.`,
+      `Jalankan ${taskType}? Proses ini berjalan bertahap (chunked) di background.`,
       'Ya, Jalankan'
     );
     if (!confirm.isConfirmed) return;
@@ -103,50 +103,74 @@ export default function ScraperAdmin() {
     setActiveTask(taskType);
     adminAlert.loading('Memulai tugas...', 'Sistem sedang mempersiapkan scraper.');
     
+    let currentState = {};
+    let isRunning = true;
+    let accumulatedSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    let totalItemsEstimated = 100; // Default estimation until the first chunk returns the real total
+
+    adminAlert.success('Tugas Dimulai!', 'Memproses data secara bertahap (chunked)...');
+
+    // Make the stop button work by setting a global or ref, but for now we'll just use a simple state check if possible
+    // To properly support "Force Stop" during chunks, we would need a ref, but let's stick to the basic loop
+    
     try {
-      const response = await fetch('/api/scraper/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: taskType })
-      });
-      
-      adminAlert.close();
+      while (isRunning) {
+        setProgress({ 
+          current: accumulatedSummary.items_processed, 
+          total: totalItemsEstimated, 
+          current_item: `Memproses chunk...` 
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        adminAlert.error('Gagal!', errorData.error || 'Terjadi kesalahan.');
-        setIsLoading(false);
-        setActiveTask(null);
-        return;
-      }
+        const response = await fetch('/api/scraper/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task: taskType, state: currentState })
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          adminAlert.error('Gagal!', errorData.error || 'Terjadi kesalahan saat memproses chunk.');
+          break;
+        }
 
-      // Response is a stream - just confirm it started and let polling handle progress
-      adminAlert.success('Tugas Dimulai!', 'Monitor progress bar untuk status terbaru.');
-      fetchLogs();
+        const data = await response.json();
+        
+        if (data.total) {
+          totalItemsEstimated = data.total;
+        }
 
-      // Read the stream in background to keep connection alive
-      if (response.body) {
-        const reader = response.body.getReader();
-        const read = async () => {
-          try {
-            while (true) {
-              const { done } = await reader.read();
-              if (done) break;
-              fetchLogs(); // Refresh logs as we receive heartbeats
-            }
-          } catch { /* stream closed */ }
-          finally {
-            setIsLoading(false);
-            setActiveTask(null);
-            fetchLogs();
-          }
-        };
-        read();
+        if (data.summary) {
+          accumulatedSummary.items_processed += data.summary.items_processed || 0;
+          accumulatedSummary.items_added += data.summary.items_added || 0;
+          accumulatedSummary.items_failed += data.summary.items_failed || 0;
+        }
+
+        // Update progress instantly after receiving chunk result
+        setProgress({ 
+          current: accumulatedSummary.items_processed, 
+          total: totalItemsEstimated, 
+          current_item: `Sedang memproses...` 
+        });
+
+        if (data.hasMore && data.nextState) {
+          currentState = data.nextState;
+          // Add a small delay between chunks to prevent overwhelming the browser/server
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+          isRunning = false;
+          adminAlert.success('Selesai', `Tugas ${taskType} selesai diproses. Total: ${accumulatedSummary.items_processed} items.`);
+        }
+        
+        // Refresh logs to show new data
+        fetchLogs();
       }
     } catch (err) {
       adminAlert.error('Error Connection', 'Gagal menghubungi server scraper.');
+    } finally {
       setIsLoading(false);
       setActiveTask(null);
+      setProgress(null);
+      fetchLogs();
     }
   };
 
@@ -158,18 +182,19 @@ export default function ScraperAdmin() {
     );
     if (!confirm.isConfirmed) return;
 
+    // Untuk arsitektur chunking yang baru, kita cukup me-reload halaman atau mengatur state isLoading
+    // Karena request tidak lagi streaming terus-menerus di server
+    adminAlert.loading('Menghentikan...', 'Mengirim sinyal abort ke server');
+    
+    // Fallback stop
     try {
-      adminAlert.loading('Menghentikan...', 'Mengirim sinyal abort ke server');
-      const res = await fetch('/api/scraper/stop', { method: 'POST' });
-      const data = await res.json();
-      
-      if (!res.ok) throw new Error(data.error || 'Failed to stop scraper');
-      
-      adminAlert.success('Berhasil', 'Scraper berhasil dihentikan secara paksa.');
-      fetchLogs(); // Segera refresh log untuk melihat status 'failed'
-    } catch (err: any) {
-      adminAlert.error('Gagal', err.message);
-    }
+      await fetch('/api/scraper/stop', { method: 'POST' }).catch(() => {});
+    } catch(e) {}
+
+    setTimeout(() => {
+      adminAlert.success('Berhasil', 'Proses chunking dihentikan secara lokal.');
+      window.location.reload();
+    }, 1000);
   };
 
   return (

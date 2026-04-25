@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Increase max duration for Netlify/Vercel
-export const maxDuration = 300; // 5 minutes
+// Increase max duration for Vercel (ignored by standard Netlify but kept for compatibility)
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   try {
@@ -15,10 +15,8 @@ export async function POST(req: Request) {
     const { data: sData } = await supabase.from('settings').select('value').eq('key', 'scraper_config').single();
     const scraperConfig = sData?.value || {};
     
-    // 1. Auth Check (only authenticated admins can trigger manually)
+    // Auth Check
     const { data: { user } } = await supabase.auth.getUser();
-    
-    // Also allow secret key for Cron Jobs
     const authHeader = req.headers.get('authorization');
     const cronSecret = scraperConfig.scraper_secret || process.env.SCRAPER_SECRET;
     const isCron = cronSecret && (authHeader === `Bearer ${cronSecret}`);
@@ -27,69 +25,74 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { task, pages } = await req.json();
+    const { task, state = {} } = await req.json();
     const scraper = ScraperService.getInstance();
-    const intensity = pages || scraperConfig.discovery_pages || 3;
+    const intensity = scraperConfig.discovery_pages || 3;
 
-    // Use streaming response to keep serverless function alive
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const sendEvent = (data: string) => {
-          try {
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          } catch { /* stream may be closed */ }
-        };
+    let logId = state.logId;
+    if (!logId) {
+       // Start of task: create a new log
+       logId = await scraper.createLog(task);
+       if (!logId) {
+          return NextResponse.json({ error: 'Task already running' }, { status: 400 });
+       }
+    }
 
-        sendEvent(JSON.stringify({ status: 'started', task }));
+    let result: any;
 
-        // Heartbeat to prevent timeout
-        const heartbeat = setInterval(() => {
-          sendEvent(JSON.stringify({ status: 'heartbeat', timestamp: Date.now() }));
-        }, 10000);
+    if (task === 'scrape') {
+      result = await scraper.runDiscoveryChunk(intensity, state);
+    } else if (task === 'trending') {
+      result = await scraper.runTrendingChunk(state);
+    } else if (task === 'validate') {
+      result = await scraper.runHealthCheckChunk(state);
+    } else if (task === 'sync') {
+      result = await scraper.runSyncMetadataChunk(state);
+    } else if (task === 'subtitles') {
+      result = await scraper.runSyncSubtitlesChunk(state);
+    } else {
+      return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
+    }
 
-        try {
-          let result;
-          if (task === 'scrape') {
-            result = await scraper.runDiscovery(intensity);
-          } else if (task === 'trending') {
-            result = await scraper.runTrendingDiscovery();
-          } else if (task === 'validate') {
-            result = await scraper.validateLinks();
-          } else if (task === 'sync') {
-            result = await scraper.syncAllMetadata();
-          } else if (task === 'subtitles') {
-            result = await scraper.syncMissingSubtitles();
-          } else {
-            sendEvent(JSON.stringify({ status: 'error', message: 'Invalid task' }));
-            clearInterval(heartbeat);
-            controller.close();
-            return;
-          }
+    // Accumulate summary to show total in the log
+    const accumulatedProcessed = (state.accumulatedProcessed || 0) + (result.summary?.items_processed || 0);
+    const accumulatedAdded = (state.accumulatedAdded || 0) + (result.summary?.items_added || 0);
+    const accumulatedFailed = (state.accumulatedFailed || 0) + (result.summary?.items_failed || 0);
 
-          sendEvent(JSON.stringify({ status: 'completed', result }));
-        } catch (err: any) {
-          sendEvent(JSON.stringify({ status: 'error', message: err.message }));
-        } finally {
-          clearInterval(heartbeat);
-          controller.close();
+    const fullSummary = {
+        items_processed: accumulatedProcessed,
+        items_added: accumulatedAdded,
+        items_failed: accumulatedFailed,
+        errors: result.summary?.errors || []
+    };
+
+    if (logId) {
+        if (result.hasMore) {
+            await scraper.updateLogProgress(logId, accumulatedProcessed, result.total || accumulatedProcessed, 'Memproses batch...');
+        } else {
+            await scraper.updateLog(logId, 'success', fullSummary);
         }
-      }
-    });
+    }
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    // Embed logId and accumulators into nextState so the client passes them back
+    if (result.hasMore) {
+        result.nextState = {
+            ...result.nextState,
+            logId,
+            accumulatedProcessed,
+            accumulatedAdded,
+            accumulatedFailed
+        };
+    }
+
+    return NextResponse.json({ success: true, ...result, logId });
+
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-// GET handler for Cron hits (triggers full routine)
+// GET handler for Cron hits (triggers one chunk per hit)
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -122,45 +125,67 @@ export async function GET(req: Request) {
     }
 
     const scraper = ScraperService.getInstance();
-    const intensity = scraperConfig.discovery_pages || 5;
+    const intensity = scraperConfig.discovery_pages || 3;
     
-    // Use streaming to keep alive on serverless
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const sendEvent = (data: string) => {
-          try {
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          } catch { /* stream may be closed */ }
-        };
+    // 1. Fetch persistent cron state
+    const { data: cronStateData } = await supabase.from('settings').select('value').eq('key', 'cron_state').single();
+    let cronState = cronStateData?.value || {};
 
-        sendEvent(JSON.stringify({ status: 'started', intensity }));
+    let logId = cronState.logId;
+    if (!logId) {
+       // Start of a brand new automated task
+       logId = await scraper.createLog('Automated Discovery (CRON)');
+       if (!logId) {
+          return NextResponse.json({ error: 'Another task is already running' }, { status: 400 });
+       }
+       cronState.logId = logId;
+    }
 
-        const heartbeat = setInterval(() => {
-          sendEvent(JSON.stringify({ status: 'heartbeat', timestamp: Date.now() }));
-        }, 10000);
+    // 2. Execute ONE chunk
+    console.log(`[Scraper API] Executing CRON chunk (Intensity: ${intensity})`);
+    const result = await scraper.runDiscoveryChunk(intensity, cronState);
 
-        try {
-          console.log(`[Scraper API] Triggering full routine via CRON (Intensity: ${intensity})`);
-          const result = await scraper.runFullRoutine(intensity);
-          sendEvent(JSON.stringify({ status: 'completed', result }));
-        } catch (err: any) {
-          console.error('[Scraper API] Background routine error:', err);
-          sendEvent(JSON.stringify({ status: 'error', message: err.message }));
-        } finally {
-          clearInterval(heartbeat);
-          controller.close();
+    // 3. Accumulate summary
+    const accumulatedProcessed = (cronState.accumulatedProcessed || 0) + (result.summary?.items_processed || 0);
+    const accumulatedAdded = (cronState.accumulatedAdded || 0) + (result.summary?.items_added || 0);
+    const accumulatedFailed = (cronState.accumulatedFailed || 0) + (result.summary?.items_failed || 0);
+
+    const fullSummary = {
+        items_processed: accumulatedProcessed,
+        items_added: accumulatedAdded,
+        items_failed: accumulatedFailed,
+        errors: result.summary?.errors || []
+    };
+
+    if (logId) {
+        if (result.hasMore) {
+            await scraper.updateLogProgress(logId, accumulatedProcessed, result.total || accumulatedProcessed, 'CRON processing chunk...');
+        } else {
+            await scraper.updateLog(logId, 'success', fullSummary);
         }
-      }
+    }
+
+    // 4. Save state for next CRON ping
+    if (result.hasMore) {
+        const nextStateToSave = {
+            ...result.nextState,
+            logId,
+            accumulatedProcessed,
+            accumulatedAdded,
+            accumulatedFailed
+        };
+        await supabase.from('settings').upsert({ key: 'cron_state', value: nextStateToSave }, { onConflict: 'key' });
+    } else {
+        // Task completely finished, wipe the state so it starts fresh next time
+        await supabase.from('settings').delete().eq('key', 'cron_state');
+    }
+
+    return NextResponse.json({ 
+        success: true, 
+        message: result.hasMore ? 'Chunk processed successfully. Awaiting next CRON hit.' : 'Automated scraping cycle completely finished.',
+        items_processed_this_chunk: result.summary?.items_processed || 0
     });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
   } catch (err: any) {
     console.error('[Scraper API] GET Handler Exception:', err);
     return NextResponse.json({ error: 'Internal Server Error', message: err.message }, { status: 500 });
