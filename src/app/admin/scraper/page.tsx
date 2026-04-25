@@ -110,16 +110,38 @@ export default function ScraperAdmin() {
         body: JSON.stringify({ task: taskType })
       });
       
-      const result = await response.json();
       adminAlert.close();
-      
-      if (result.success) {
-        adminAlert.success('Tugas Dimulai!', 'Monitor progress bar untuk status terbaru.');
-        fetchLogs();
-      } else {
-        adminAlert.error('Gagal!', result.error || 'Terjadi kesalahan.');
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        adminAlert.error('Gagal!', errorData.error || 'Terjadi kesalahan.');
         setIsLoading(false);
         setActiveTask(null);
+        return;
+      }
+
+      // Response is a stream - just confirm it started and let polling handle progress
+      adminAlert.success('Tugas Dimulai!', 'Monitor progress bar untuk status terbaru.');
+      fetchLogs();
+
+      // Read the stream in background to keep connection alive
+      if (response.body) {
+        const reader = response.body.getReader();
+        const read = async () => {
+          try {
+            while (true) {
+              const { done } = await reader.read();
+              if (done) break;
+              fetchLogs(); // Refresh logs as we receive heartbeats
+            }
+          } catch { /* stream closed */ }
+          finally {
+            setIsLoading(false);
+            setActiveTask(null);
+            fetchLogs();
+          }
+        };
+        read();
       }
     } catch (err) {
       adminAlert.error('Error Connection', 'Gagal menghubungi server scraper.');

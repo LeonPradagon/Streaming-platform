@@ -5,15 +5,18 @@ export async function GET() {
   
   const providers = [
     { name: 'TMDB API', url: `https://api.themoviedb.org/3/configuration?api_key=${tmdbKey}` },
-    { name: 'Vidlink.pro', url: 'https://vidlink.pro' },
-    { name: 'Vidsrc.pm', url: 'https://vidsrc.pm' }
+    // Old providers
+    { name: 'VidLink', url: 'https://vidlink.pro' },
+    { name: 'MoviesAPI', url: 'https://moviesapi.to' },
+    // New providers
+    { name: 'Videasy', url: 'https://player.videasy.net' }
   ];
 
   const results = await Promise.all(providers.map(async (p) => {
     const start = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
       
       const res = await fetch(p.url, { 
         method: 'HEAD', 
@@ -26,15 +29,15 @@ export async function GET() {
       
       return {
         name: p.name,
-        status: res.ok || res.status === 403 ? 'Operational' : 'Issue Detected',
+        status: res.ok || res.status === 403 || res.status === 405 ? 'Operational' : 'Issue Detected',
         delay: `${latency}ms`,
-        isHealthy: res.ok || res.status === 403
+        isHealthy: res.ok || res.status === 403 || res.status === 405
       };
     } catch (err) {
       return {
         name: p.name,
         status: 'Offline',
-        delay: '>3000ms',
+        delay: '>5000ms',
         isHealthy: false
       };
     }

@@ -55,6 +55,11 @@ export default function CatalogFilters({ query, type, status }: { query: string;
         <option value="tv">TV Series</option>
         <option value="anime">Anime</option>
         <option value="drakor">Drakor</option>
+        <option value="drachin">Drachin</option>
+        <option value="donghua">Donghua</option>
+        <option value="variety">Variety</option>
+        <option value="drathai">Thai Drama</option>
+        <option value="drajep">J-Drama</option>
       </select>
 
       <select 

@@ -161,7 +161,7 @@ export default async function Home() {
             title={TYPE_LABELS.drakor}
             items={typeGroups.drakor.slice(0, 30)}
             icon={<Tv size={22} />}
-            viewAllHref="/browse?type=tv"
+            viewAllHref="/browse?type=drakor"
           />
         )}
 
@@ -191,6 +191,7 @@ export default async function Home() {
             title={TYPE_LABELS.drachin}
             items={typeGroups.drachin.slice(0, 30)}
             icon={<MonitorPlay size={22} />}
+            viewAllHref="/browse?type=drachin"
           />
         )}
 

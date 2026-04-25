@@ -117,7 +117,7 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href="https://oqpubtvugpevpgflrjwv.supabase.co" />
         <link rel="preconnect" href="https://oqpubtvugpevpgflrjwv.supabase.co" crossOrigin="anonymous" />
       </head>
-      <body className="font-sans antialiased text-gray-100 bg-[#0f0f0f] min-h-screen">
+      <body suppressHydrationWarning className="font-sans antialiased text-gray-100 bg-[#0f0f0f] min-h-screen">
         {isAdminRoute || isAuthRoute ? (
           /* Admin/Auth routes: just render children */
           <>

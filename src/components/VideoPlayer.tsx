@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Loader2, AlertCircle, RefreshCcw, ChevronRight } from "lucide-react";
+import { Loader2, AlertCircle, RefreshCcw, ChevronRight, ServerCrash } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 
@@ -13,7 +13,6 @@ interface VideoPlayerProps {
   mediaType?: "movie" | "tv";
   season?: number;
   episode?: number;
-  nextEpisodeUrl?: string;
 }
 
 export default function VideoPlayer({
@@ -24,22 +23,18 @@ export default function VideoPlayer({
   mediaType,
   season,
   episode,
-  nextEpisodeUrl,
 }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [subtitle, setSubtitle] = useState<{
-    url: string;
-    language: string;
-  } | null>(null);
+  const [iframeReady, setIframeReady] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [key, setKey] = useState(0);
-  const [showSubtitleToast, setShowSubtitleToast] = useState(false);
 
   // Reset loading when source changes
   useEffect(() => {
     setIsLoading(true);
     setHasError(false);
+    setIframeReady(false);
     setKey((prev) => prev + 1);
   }, [src]);
 
@@ -79,6 +74,7 @@ export default function VideoPlayer({
   const handleReload = useCallback(() => {
     setIsLoading(true);
     setHasError(false);
+    setIframeReady(false);
     setKey((prev) => prev + 1);
   }, []);
 
@@ -86,17 +82,17 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!isLoading) return;
 
-    // After 8 seconds, force-show the iframe even if onLoad hasn't fired
-    // (many embed providers don't trigger onLoad correctly)
+    // After 6 seconds, show the iframe (many providers don't fire onLoad)
     const fallbackTimer = setTimeout(() => {
+      setIframeReady(true);
       setIsLoading(false);
-    }, 8000);
+    }, 6000);
 
-    // After 30 seconds, show the error state
+    // After 20 seconds of no content, show a soft warning (not error)
     const errorTimer = setTimeout(() => {
       setHasError(true);
       setIsLoading(false);
-    }, 30000);
+    }, 20000);
 
     return () => {
       clearTimeout(fallbackTimer);
@@ -104,28 +100,7 @@ export default function VideoPlayer({
     };
   }, [isLoading, key]);
 
-  // Fetch subtitles
-  useEffect(() => {
-    if (tmdbId) {
-      const fetchSubtitle = async () => {
-        try {
-          const res = await fetch(
-            `/api/subtitles?tmdb_id=${tmdbId}&type=${mediaType || "movie"}${season ? `&season=${season}` : ""}${episode ? `&episode=${episode}` : ""}`,
-          );
-          const data = await res.json();
-          if (data.url) {
-            setSubtitle({
-              url: data.url,
-              language: data.language === "id" ? "Indonesian" : "English",
-            });
-          }
-        } catch (err) {
-          console.error("[VideoPlayer] Subtitle fetch failed:", err);
-        }
-      };
-      fetchSubtitle();
-    }
-  }, [tmdbId, mediaType, season, episode]);
+  // Timeout to detect "stuck" loading
 
   // Handle progress tracking from iframe postMessage
   useEffect(() => {
@@ -142,6 +117,7 @@ export default function VideoPlayer({
           // Video is playing — definitely not loading
           setIsLoading(false);
           setHasError(false);
+          setIframeReady(true);
 
           if (currentTime > 10 && tmdbId) {
             const now = Date.now();
@@ -182,39 +158,23 @@ export default function VideoPlayer({
     return () => window.removeEventListener("message", handleMessage);
   }, [tmdbId]);
 
-  // Handle subtitle toast visibility
-  useEffect(() => {
-    if (!isLoading && subtitle) {
-      setShowSubtitleToast(true);
-      const timer = setTimeout(() => {
-        setShowSubtitleToast(false);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoading, subtitle]);
+  // Handle progress tracking from iframe postMessage
 
   // Build final iframe URL with provider-specific params
   const getFinalUrl = (url: string) => {
     try {
       const urlObj = new URL(url);
 
-      // VidLink.pro specific params
-      if (url.includes("vidlink")) {
-        urlObj.searchParams.set("primaryColor", "E50914");
-        urlObj.searchParams.set("secondaryColor", "ffffff");
-        urlObj.searchParams.set("iconColor", "ffffff");
-        urlObj.searchParams.set("autoplay", "1");
+      // Autoplay for providers that support it
+      if (url.includes('videasy') || url.includes('vidlink')) {
+        urlObj.searchParams.set('autoplay', '1');
       }
 
-      // VidSrc & MoviesAPI.to specific params
-      if (url.includes("vidsrc") || url.includes("moviesapi.to")) {
-        urlObj.searchParams.set("autoplay", "1");
-      }
-
-      // Subtitle injection (provider-agnostic)
-      if (subtitle?.url) {
-        urlObj.searchParams.set("sub", subtitle.url);
-        urlObj.searchParams.set("subtitle", subtitle.url);
+      // VidLink specific styling
+      if (url.includes('vidlink')) {
+        urlObj.searchParams.set('primaryColor', 'E50914');
+        urlObj.searchParams.set('secondaryColor', 'ffffff');
+        urlObj.searchParams.set('iconColor', 'ffffff');
       }
 
       return urlObj.toString();
@@ -224,8 +184,8 @@ export default function VideoPlayer({
   };
 
   return (
-    <div className="video-player-container relative w-full h-full bg-black rounded-inherit overflow-hidden group">
-      {/* Actual iframe — always mounted, visibility controlled by CSS */}
+    <div className="relative w-full h-full bg-black overflow-hidden group">
+      {/* Actual iframe — always mounted */}
       <iframe
         key={key}
         ref={iframeRef}
@@ -233,46 +193,31 @@ export default function VideoPlayer({
         title={title}
         className="absolute inset-0 w-full h-full border-none z-10"
         style={{
-          opacity: isLoading ? 0 : 1,
+          opacity: iframeReady ? 1 : 0,
           transition: "opacity 0.5s ease-in-out",
           backgroundColor: "#000",
+          colorScheme: "dark",
         }}
         allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
-        referrerPolicy="origin"
+        referrerPolicy="no-referrer"
         onLoad={() => {
+          setIsLoading(false);
+          setTimeout(() => setIframeReady(true), 300);
+        }}
+        onError={() => {
+          setHasError(true);
           setIsLoading(false);
         }}
         allowFullScreen
       />
 
-      {/* Subtitle Status Toast */}
-      <AnimatePresence>
-        {subtitle && !isLoading && showSubtitleToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute bottom-6 left-6 z-30 bg-black/80 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 flex items-center gap-3 shadow-2xl pointer-events-none"
-          >
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-black text-white uppercase tracking-widest">
-              Subtitles Active: {subtitle.language}
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Black base layer to prevent any white flash */}
+      <div 
+        className="absolute inset-0 z-[5] bg-black pointer-events-none" 
+        style={{ opacity: iframeReady ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }} 
+      />
 
-      {/* Next Episode Button Overlay */}
-      {nextEpisodeUrl && !isLoading && (
-        <div className="absolute top-6 right-6 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <Link
-            href={nextEpisodeUrl}
-            className="flex items-center gap-2 bg-white/10 hover:bg-white text-white hover:text-black backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 transition-all font-black text-[10px] uppercase tracking-widest shadow-2xl"
-          >
-            Next Episode <ChevronRight size={14} />
-          </Link>
-        </div>
-      )}
+
 
       {/* Loading Overlay */}
       <AnimatePresence>
@@ -281,14 +226,15 @@ export default function VideoPlayer({
             key="loading"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.4 } }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]"
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black"
           >
             <motion.div
-              className="absolute inset-0 opacity-30 bg-cover bg-center"
+              className="absolute inset-0 opacity-20 bg-cover bg-center"
               style={{
                 backgroundImage: backdrop
-                  ? `linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)), url(${backdrop})`
+                  ? `linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.5)), url(${backdrop})`
                   : "none",
+                filter: "blur(8px)",
               }}
               animate={{ scale: [1, 1.05] }}
               transition={{
@@ -297,21 +243,16 @@ export default function VideoPlayer({
                 repeatType: "reverse",
               }}
             />
-
             <div className="relative z-10 flex flex-col items-center gap-6">
               <div className="relative">
-                <div className="absolute inset-0 bg-[#E50914] blur-2xl opacity-20 animate-pulse" />
-                <Loader2
-                  className="animate-spin text-[#E50914] relative z-10"
-                  size={56}
-                  strokeWidth={3}
-                />
+                <div className="absolute inset-0 bg-[#E50914] blur-2xl opacity-25 animate-pulse" />
+                <Loader2 className="animate-spin text-[#E50914] relative z-10" size={52} strokeWidth={2.5} />
               </div>
               <div className="flex flex-col items-center gap-2">
                 <span className="text-white font-black tracking-[4px] text-xs uppercase animate-pulse">
                   Menyiapkan Film...
                 </span>
-                <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">
+                <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest max-w-[240px] truncate text-center">
                   {title}
                 </span>
               </div>
@@ -320,7 +261,7 @@ export default function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* Error Overlay */}
+      {/* Error / Slow Connection Overlay */}
       <AnimatePresence>
         {hasError && (
           <motion.div
@@ -328,46 +269,35 @@ export default function VideoPlayer({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]"
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black"
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="flex flex-col items-center gap-8 px-8 text-center max-w-sm"
+              className="flex flex-col items-center gap-6 px-8 text-center max-w-sm"
             >
-              <div className="w-20 h-20 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
-                <AlertCircle className="text-zinc-500" size={40} />
+              <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-white/5 flex items-center justify-center">
+                <ServerCrash className="text-zinc-500" size={32} />
               </div>
-              <div className="space-y-3">
-                <h3 className="text-white font-black text-xl tracking-tight">
-                  Koneksi Agak Lambat?
+              <div className="space-y-2">
+                <h3 className="text-white font-black text-lg tracking-tight">
+                  Server Tidak Merespon
                 </h3>
-                <p className="text-zinc-400 text-sm font-medium leading-relaxed">
-                  Beberapa server membutuhkan waktu ekstra. Coba segarkan
-                  player atau ganti server di samping.
+                <p className="text-zinc-500 text-xs font-medium leading-relaxed">
+                  Coba muat ulang atau pilih server lain.
                 </p>
               </div>
               <button
                 onClick={handleReload}
-                className="flex items-center gap-3 bg-white text-black px-10 py-4 rounded-full font-black text-sm hover:scale-105 transition-all active:scale-95 shadow-xl"
+                className="flex items-center gap-2.5 bg-[#E50914] hover:bg-red-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase tracking-wider hover:scale-105 transition-all active:scale-95 shadow-lg shadow-red-500/20"
               >
-                <RefreshCcw size={18} /> COBA LAGI
+                <RefreshCcw size={16} /> Muat Ulang
               </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      <style jsx global>{`
-        .video-player-container {
-          aspect-ratio: 16 / 9;
-        }
-        @media (max-width: 768px) {
-          .video-player-container {
-            aspect-ratio: 16 / 10;
-          }
-        }
-      `}</style>
     </div>
   );
 }
+

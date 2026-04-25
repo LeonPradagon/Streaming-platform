@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import { 
   Globe, 
   Cpu, 
@@ -19,6 +19,11 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
   initialScraperConfig: any 
 }) {
   const [isPending, startTransition] = useTransition();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   async function handleSaveGeneral(formData: FormData) {
     startTransition(async () => {
@@ -46,18 +51,20 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
 
   async function handleSaveScraper(formData: FormData) {
     startTransition(async () => {
-      const videospider = formData.get('videospider') === 'on';
-      const superembed = formData.get('superembed') === 'on';
+      // Old providers
+      const vidlink = formData.get('vidlink') === 'on';
       const moviesapito = formData.get('moviesapito') === 'on';
+      // New providers  
+      const videasy = formData.get('videasy') === 'on';
       const autoApprove = formData.get('auto_approve') === 'on';
       const autoScrape = formData.get('auto_scrape') === 'on';
       const scraperSecret = formData.get('scraper_secret') as string;
       const discoveryPages = parseInt(formData.get('discovery_pages') as string) || 3;
 
       const result = await updateSettings('scraper_config', { 
-        videospider_enabled: videospider, 
-        superembed_enabled: superembed, 
+        vidlink_enabled: vidlink,
         moviesapito_enabled: moviesapito,
+        videasy_enabled: videasy, 
         auto_approve: autoApprove,
         auto_scrape_enabled: autoScrape,
         scraper_secret: scraperSecret,
@@ -177,18 +184,25 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
               <h3 className="text-xl font-black text-white">Kontrol Scraper</h3>
             </div>
 
-            <form action={handleSaveScraper} className="flex flex-col gap-6">
-              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
-                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">VideoSpider Provider</span>
-                <input type="checkbox" name="videospider" defaultChecked={initialScraperConfig.videospider_enabled} className="w-5 h-5 accent-sky-400" />
+            <form action={handleSaveScraper} className="flex flex-col gap-4">
+              <div className="mb-2">
+                <span className="text-[10px] font-black text-zinc-600 uppercase tracking-[2px]">Server Lama</span>
               </div>
-              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
-                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">SuperEmbed Provider</span>
-                <input type="checkbox" name="superembed" defaultChecked={initialScraperConfig.superembed_enabled} className="w-5 h-5 accent-sky-400" />
+              <div className="flex justify-between items-center px-2 py-3 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">VidLink (vidlink.pro)</span>
+                <input type="checkbox" name="vidlink" defaultChecked={initialScraperConfig.vidlink_enabled !== false} className="w-5 h-5 accent-sky-400" />
               </div>
-              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
-                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">MoviesAPI.to Provider (Server 3)</span>
-                <input type="checkbox" name="moviesapito" defaultChecked={initialScraperConfig.moviesapito_enabled} className="w-5 h-5 accent-sky-400" />
+              <div className="flex justify-between items-center px-2 py-3 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">MoviesAPI (moviesapi.to)</span>
+                <input type="checkbox" name="moviesapito" defaultChecked={initialScraperConfig.moviesapito_enabled !== false} className="w-5 h-5 accent-sky-400" />
+              </div>
+
+              <div className="mb-2 mt-4">
+                <span className="text-[10px] font-black text-zinc-600 uppercase tracking-[2px]">Server Baru</span>
+              </div>
+              <div className="flex justify-between items-center px-2 py-3 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">Videasy (player.videasy.net)</span>
+                <input type="checkbox" name="videasy" defaultChecked={initialScraperConfig.videasy_enabled !== false} className="w-5 h-5 accent-sky-400" />
               </div>
 
               <div className="p-5 bg-sky-500/5 rounded-2xl border border-sky-500/10 flex gap-4">
@@ -239,7 +253,7 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
                   <div className="p-4 bg-black/50 rounded-xl border border-violet-500/20 border-dashed">
                     <div className="text-[9px] font-black text-violet-400 uppercase tracking-[2px] mb-2">Cron Trigger Endpoint</div>
                     <code className="text-[10px] text-zinc-500 font-mono break-all selection:bg-violet-500 selection:text-white">
-                      {typeof window !== 'undefined' ? `${window.location.origin}/api/scraper/run?secret=${initialScraperConfig.scraper_secret || 'YOUR_KEY'}` : 'Loading...'}
+                      {mounted ? `${window.location.origin}/api/scraper/run?secret=${initialScraperConfig.scraper_secret || 'YOUR_KEY'}` : 'Loading...'}
                     </code>
                   </div>
                 )}

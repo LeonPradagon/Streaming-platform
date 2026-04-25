@@ -65,7 +65,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
             {currentItem.type === "tv" ? "Series" : "Movie"}
           </div>
 
-          <h1 className="text-3xl md:text-5xl lg:text-6xl font-black text-white leading-tight mb-2 drop-shadow-lg uppercase tracking-wider font-sans">
+          <h1 className="text-2xl md:text-5xl lg:text-6xl font-black text-white leading-tight mb-2 drop-shadow-lg uppercase tracking-wider font-sans">
             {currentItem.title}
           </h1>
 

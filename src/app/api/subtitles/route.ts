@@ -1,30 +1,10 @@
 import { NextResponse } from 'next/server';
 import { SubtitleService } from '@/services/SubtitleService';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Rate Limit Map
-const rateLimitMap = new Map<string, { count: number, resetAt: number }>();
-
 export async function GET(req: Request) {
-  // Rate Limiting
-  const ip = req.headers.get('x-forwarded-for') || 'unknown';
-  const now = Date.now();
-  const rateRecord = rateLimitMap.get(ip) || { count: 0, resetAt: now + 60000 };
-  
-  if (now > rateRecord.resetAt) {
-    rateRecord.count = 1;
-    rateRecord.resetAt = now + 60000;
-  } else {
-    rateRecord.count += 1;
-  }
-  rateLimitMap.set(ip, rateRecord);
-
-  if (rateRecord.count > 30) {
-    return NextResponse.json({ error: 'Too many requests / Rate Limited' }, { status: 429 });
-  }
-
   const { searchParams } = new URL(req.url);
   const tmdbId = searchParams.get('tmdb_id');
   const type = (searchParams.get('type') || 'movie') as 'movie' | 'tv';

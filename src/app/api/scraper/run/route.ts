@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Increase max duration for Netlify/Vercel
+export const maxDuration = 300; // 5 minutes
 
 export async function POST(req: Request) {
   try {
@@ -28,28 +30,66 @@ export async function POST(req: Request) {
     const { task, pages } = await req.json();
     const scraper = ScraperService.getInstance();
     const intensity = pages || scraperConfig.discovery_pages || 3;
-    
-    if (task === 'scrape') {
-      scraper.runDiscovery(intensity).catch(console.error);
-    } else if (task === 'trending') {
-      scraper.runTrendingDiscovery().catch(console.error);
-    } else if (task === 'validate') {
-      scraper.validateLinks().catch(console.error);
-    } else if (task === 'sync') {
-      scraper.syncAllMetadata().catch(console.error);
-    } else if (task === 'subtitles') {
-      scraper.syncMissingSubtitles().catch(console.error);
-    } else {
-      return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
-    }
 
-    return NextResponse.json({ success: true, message: 'Task started in background' });
+    // Use streaming response to keep serverless function alive
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: string) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          } catch { /* stream may be closed */ }
+        };
+
+        sendEvent(JSON.stringify({ status: 'started', task }));
+
+        // Heartbeat to prevent timeout
+        const heartbeat = setInterval(() => {
+          sendEvent(JSON.stringify({ status: 'heartbeat', timestamp: Date.now() }));
+        }, 10000);
+
+        try {
+          let result;
+          if (task === 'scrape') {
+            result = await scraper.runDiscovery(intensity);
+          } else if (task === 'trending') {
+            result = await scraper.runTrendingDiscovery();
+          } else if (task === 'validate') {
+            result = await scraper.validateLinks();
+          } else if (task === 'sync') {
+            result = await scraper.syncAllMetadata();
+          } else if (task === 'subtitles') {
+            result = await scraper.syncMissingSubtitles();
+          } else {
+            sendEvent(JSON.stringify({ status: 'error', message: 'Invalid task' }));
+            clearInterval(heartbeat);
+            controller.close();
+            return;
+          }
+
+          sendEvent(JSON.stringify({ status: 'completed', result }));
+        } catch (err: any) {
+          sendEvent(JSON.stringify({ status: 'error', message: err.message }));
+        } finally {
+          clearInterval(heartbeat);
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-// GET handler for simple Vercel Cron hits (triggers full routine)
+// GET handler for Cron hits (triggers full routine)
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -84,16 +124,42 @@ export async function GET(req: Request) {
     const scraper = ScraperService.getInstance();
     const intensity = scraperConfig.discovery_pages || 5;
     
-    // Full routine: Trending + Discovery (with intensity from settings)
-    console.log(`[Scraper API] Triggering full routine via CRON (Intensity: ${intensity})`);
-    scraper.runFullRoutine(intensity).catch(err => {
-      console.error('[Scraper API] Background routine error:', err);
+    // Use streaming to keep alive on serverless
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: string) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          } catch { /* stream may be closed */ }
+        };
+
+        sendEvent(JSON.stringify({ status: 'started', intensity }));
+
+        const heartbeat = setInterval(() => {
+          sendEvent(JSON.stringify({ status: 'heartbeat', timestamp: Date.now() }));
+        }, 10000);
+
+        try {
+          console.log(`[Scraper API] Triggering full routine via CRON (Intensity: ${intensity})`);
+          const result = await scraper.runFullRoutine(intensity);
+          sendEvent(JSON.stringify({ status: 'completed', result }));
+        } catch (err: any) {
+          console.error('[Scraper API] Background routine error:', err);
+          sendEvent(JSON.stringify({ status: 'error', message: err.message }));
+        } finally {
+          clearInterval(heartbeat);
+          controller.close();
+        }
+      }
     });
-    
-    return NextResponse.json({ 
-      status: 'Full routine triggered in background', 
-      intensity,
-      timestamp: new Date().toISOString()
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (err: any) {
     console.error('[Scraper API] GET Handler Exception:', err);

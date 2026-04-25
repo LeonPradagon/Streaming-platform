@@ -23,8 +23,15 @@ export default async function SettingsPage() {
   };
 
   const scraperConfig = scraperResult.data?.value || {
-    videospider_enabled: true,
-    superembed_enabled: true,
+    vidlink_enabled: true,
+    vidsrcpm_enabled: true,
+    moviesapito_enabled: true,
+    videasy_enabled: true,
+    embedsu_enabled: true,
+    multiembed_enabled: true,
+    vidsrccc_enabled: true,
+    autoembed_enabled: true,
+    embedsoap_enabled: true,
     auto_approve: false,
     auto_scrape_enabled: false,
     scraper_secret: '',

@@ -7,6 +7,12 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
 
+[functions]
+  # Allow scraper functions to run up to 5 minutes (300s)
+  # Default is 10s, Pro plan supports up to 26s for regular, background for more
+  node_bundler = "esbuild"
+  external_node_modules = ["adm-zip"]
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 

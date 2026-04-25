@@ -17,6 +17,9 @@ const TYPES = [
   { value: 'tv', label: 'Series' },
   { value: 'anime', label: 'Anime' },
   { value: 'drakor', label: 'Drakor' },
+  { value: 'drachin', label: 'Drachin' },
+  { value: 'donghua', label: 'Donghua' },
+  { value: 'variety', label: 'Variety' },
 ];
 
 const SORTS = [

@@ -23,7 +23,6 @@ export interface ScrapeTaskSummary {
 
 export class ScraperService {
   private static instance: ScraperService;
-  private static activeTasks: Set<string> = new Set();
   
   private async delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -96,9 +95,6 @@ export class ScraperService {
 
     if (staleTasks && staleTasks.length > 0) {
       console.log(`[Scraper] Cleaning up ${staleTasks.length} stale tasks...`);
-      for (const t of staleTasks) {
-        ScraperService.activeTasks.delete(t.task_name);
-      }
 
       await supabase
         .from('scraper_logs')
@@ -118,15 +114,7 @@ export class ScraperService {
     // 1. Always cleanup stale tasks first to avoid getting stuck
     await this.cleanupStaleTasks();
 
-    // 2. Prevent concurrent identical tasks
-    if (ScraperService.activeTasks.has(taskName)) {
-      console.warn(`[Scraper] Task ${taskName} is already running. Skipping.`);
-      return null;
-    }
-    
-    ScraperService.activeTasks.add(taskName);
-
-    // 3. Check DB for any 'running' task with same name that isn't stale (within 60m)
+    // 2. Check DB for any 'running' task with same name that isn't stale (within 60m)
     const { data: existingRunning } = await supabase
       .from('scraper_logs')
       .select('id')
@@ -154,11 +142,6 @@ export class ScraperService {
 
   private async updateLog(logId: string, status: 'success' | 'failed', summary: ScrapeTaskSummary, errorMessage?: string) {
     try {
-      const { data: log } = await supabase.from('scraper_logs').select('task_name').eq('id', logId).single();
-      if (log?.task_name) {
-        ScraperService.activeTasks.delete(log.task_name);
-      }
-
       await supabase
         .from('scraper_logs')
         .update({
@@ -212,9 +195,9 @@ export class ScraperService {
     
     return data?.value || {
       auto_approve: false,
-      videospider_enabled: true,
-      superembed_enabled: true,
+      vidlink_enabled: true,
       moviesapito_enabled: true,
+      videasy_enabled: true,
       auto_scrape_enabled: false,
       scraper_secret: '',
       discovery_pages: 3
@@ -723,20 +706,21 @@ export class ScraperService {
     return summary;
   }
 
-  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: { videospider_enabled?: boolean, superembed_enabled?: boolean, moviesapito_enabled?: boolean }) {
-    const isTV = type === 'tv';
+  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: Record<string, any>) {
+    const isTV = type !== 'movie';
     const providers = [];
 
-    if (scraperConfig.videospider_enabled) {
-      providers.push({ name: 'Server 1', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
-    }
-    
-    if (scraperConfig.superembed_enabled) {
-      providers.push({ name: 'Server 2', url: `https://vidsrc.pm/embed/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
+    // --- Available Servers ---
+    if (scraperConfig.vidlink_enabled !== false) {
+      providers.push({ name: 'VidLink', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
     }
 
-    if (scraperConfig.moviesapito_enabled) {
-      providers.push({ name: 'Server 3', url: `https://moviesapi.to/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '-1-1' : ''}` });
+    if (scraperConfig.moviesapito_enabled !== false) {
+      providers.push({ name: 'MoviesAPI', url: `https://moviesapi.to/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '-1-1' : ''}` });
+    }
+
+    if (scraperConfig.videasy_enabled !== false) {
+      providers.push({ name: 'Videasy', url: `https://player.videasy.net/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
     }
 
     for (const p of providers) {
