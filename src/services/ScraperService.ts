@@ -759,6 +759,7 @@ export class ScraperService {
 
     const currentGenreIndex = state.currentGenreIndex || 0;
     const currentPage = state.currentPage || 1;
+    const currentItemIndex = state.currentItemIndex || 0;
 
     if (currentGenreIndex >= allTasks.length) {
       return { summary, hasMore: false, total: 0, nextState: {} };
@@ -772,8 +773,9 @@ export class ScraperService {
     const data = await res.json();
 
     if (data.results && data.results.length > 0) {
-      // Process items sequentially to avoid memory spikes, but we can do small batches
-      await this.pMap(data.results, async (item: any) => {
+      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + 2); // Process 2 items at a time
+      
+      await this.pMap(resultsToProcess, async (item: any) => {
         summary.items_processed++;
         const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
         if (existing && genre.type === 'movie') return;
@@ -815,16 +817,21 @@ export class ScraperService {
         } catch (err: any) {
           summary.items_failed++;
         }
-      }, 5); // 5 concurrent for speed
+      }, 1); // Sequential processing within chunk for safety
     }
 
     // Determine next state
     let nextGenreIndex = currentGenreIndex;
-    let nextPage = currentPage + 1;
+    let nextPage = currentPage;
+    let nextItemIndex = currentItemIndex + 2;
 
-    if (nextPage > pagesPerGenre || !data.results || data.results.length === 0) {
-      nextGenreIndex++;
-      nextPage = 1;
+    if (nextItemIndex >= (data.results?.length || 0)) {
+      nextItemIndex = 0;
+      nextPage = currentPage + 1;
+      if (nextPage > pagesPerGenre || !data.results || data.results.length === 0) {
+        nextGenreIndex++;
+        nextPage = 1;
+      }
     }
 
     const hasMore = nextGenreIndex < allTasks.length;
@@ -835,7 +842,7 @@ export class ScraperService {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { genres: allTasks, currentGenreIndex: nextGenreIndex, currentPage: nextPage } : {}
+      nextState: hasMore ? { genres: allTasks, currentGenreIndex: nextGenreIndex, currentPage: nextPage, currentItemIndex: nextItemIndex } : {}
     };
   }
 
