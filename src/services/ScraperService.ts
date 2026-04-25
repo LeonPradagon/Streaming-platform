@@ -260,55 +260,35 @@ export class ScraperService {
 
         if (sError || !dbSeason) continue;
 
-        // Fetch Episodes for this season
+        // Smart Skip: If episode count matches, we might not need to fetch every episode again
+        // But for fresh metadata, we fetch once. 
         const sRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
         if (!sRes.ok) continue;
         const sData = await sRes.json();
 
-        if (sData.episodes) {
-          const epCount = sData.episodes.length;
-          for (const [epIdx, ep] of sData.episodes.entries()) {
-            // Update progress for each episode if it's a long season
-            if (logId && (epIdx % 5 === 0)) {
-               await this.updateLogProgress(logId, currentProcessed || 0, totalEstimated || 0, `${showTitle} - S${seasonItem.season_number}E${ep.episode_number}`);
-            }
+        if (sData.episodes && sData.episodes.length > 0) {
+          // Prepare episodes for bulk upsert
+          const episodesToUpsert = sData.episodes.map((ep: any) => ({
+            season_id: dbSeason.id,
+            episode_number: ep.episode_number,
+            title: ep.name,
+            overview: ep.overview,
+            still_path: ep.still_path,
+            air_date: ep.air_date
+          }));
 
-            // Episode Smart Skip: Check if episode already exists
-            const { data: existingEp } = await supabase
-              .from('episodes')
-              .select('id')
-              .eq('season_id', dbSeason.id)
-              .eq('episode_number', ep.episode_number)
-              .single();
+          // Bulk upsert episodes (much faster than one-by-one)
+          await supabase
+            .from('episodes')
+            .upsert(episodesToUpsert, { onConflict: 'season_id,episode_number' });
 
-            if (existingEp) {
-              continue;
-            }
-
-            const { data: newEp } = await supabase
-              .from('episodes')
-              .upsert({
-                season_id: dbSeason.id,
-                episode_number: ep.episode_number,
-                title: ep.name,
-                overview: ep.overview,
-                still_path: ep.still_path,
-                air_date: ep.air_date
-              }, { onConflict: 'season_id,episode_number' })
-              .select().single();
-
-            if (newEp) {
-              console.log(`[Scraper] Fetching subtitles for S${seasonItem.season_number}E${ep.episode_number}`);
-              await SubtitleService.fetchAndUploadSubtitle(
-                tmdbId, 
-                'tv', 
-                String(seasonItem.season_number), 
-                String(ep.episode_number)
-              ).catch(e => console.error(`[Scraper] Subtitle failed for S${seasonItem.season_number}E${ep.episode_number}:`, e.message));
-            }
-          }
+          console.log(`[Scraper] Bulk upserted ${episodesToUpsert.length} episodes for ${showTitle} S${seasonItem.season_number}`);
         }
-        await this.delay(500); // Delay between seasons
+        
+        // Removed individual subtitle fetching here as it causes serverless timeouts. 
+        // Subtitles should be synced using the dedicated 'sync subtitles' task.
+        
+        await this.delay(200); // Shorter delay
       }
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
