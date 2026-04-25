@@ -65,10 +65,10 @@ export default function LoginPage() {
               letterSpacing: "-1px",
             }}
           >
-            Admin Login
+            Masuk Akun
           </h1>
           <p style={{ color: "#94a3b8" }}>
-            Masuk untuk mengelola platform Anda
+            Masuk untuk menyimpan riwayat dan daftar tontonan Anda
           </p>
         </div>
 
@@ -121,7 +121,7 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 required
-                placeholder="admin@gmail.com"
+                placeholder="email@example.com"
                 style={{
                   width: "100%",
                   padding: "0.8rem 1rem 0.8rem 3rem",
@@ -191,7 +191,7 @@ export default function LoginPage() {
             color: "#64748b",
           }}
         >
-          Belum punya akun admin?{" "}
+          Belum punya akun?{" "}
           <Link href="/register" style={{ color: "#eab308", fontWeight: 700 }}>
             Daftar di sini
           </Link>
@@ -231,7 +231,7 @@ function SubmitButton() {
         <Loader2 size={20} className="animate-spin" />
       ) : (
         <>
-          Login Admin <ChevronRight size={18} />
+          Masuk Sekarang <ChevronRight size={18} />
         </>
       )}
     </button>

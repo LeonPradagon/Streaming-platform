@@ -21,7 +21,7 @@ export default async function RegisterPage() {
         <div className="glass" style={{ padding: '3rem', borderRadius: '2rem', textAlign: 'center', maxWidth: '400px' }}>
           <XCircle size={64} color="#ef4444" style={{ marginBottom: '1.5rem' }} />
           <h1 style={{ color: 'white', fontSize: '1.5rem', fontWeight: 900, marginBottom: '1rem' }}>Registrasi Ditutup</h1>
-          <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>Pendaftaran admin baru saat ini sedang dinonaktifkan oleh pemilik sistem.</p>
+          <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>Pendaftaran akun baru saat ini sedang dinonaktifkan oleh pemilik sistem.</p>
           <Link href="/login" style={{ display: 'inline-block', marginTop: '2rem', color: 'var(--primary)', fontWeight: 700 }}>Kembali ke Login</Link>
         </div>
       </div>

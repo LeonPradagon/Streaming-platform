@@ -12,8 +12,24 @@ export default function Navbar({ brandName }: { brandName: string }) {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
   const pathname = usePathname();
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+      setIsLoadingAuth(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -96,7 +112,9 @@ export default function Navbar({ brandName }: { brandName: string }) {
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
                 >
                   <User size={16} />
-                  <span className="text-sm font-semibold tracking-wide">Profile</span>
+                  <span className="text-sm font-semibold tracking-wide">
+                    {isLoadingAuth ? "..." : user ? "Profile" : "Anonymous"}
+                  </span>
                 </button>
 
                 {isProfileOpen && (
@@ -109,26 +127,46 @@ export default function Navbar({ brandName }: { brandName: string }) {
                         href="/profile"
                         className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
                       >
-                        <User size={16} /> Profile
+                        <User size={16} /> {user ? "Profile" : "Anonymous Profile"}
                       </Link>
-                      <Link
-                        href="/profile?tab=settings"
-                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
-                      >
-                        <Settings size={16} /> Settings
-                      </Link>
-                      <div className="h-px bg-white/10 my-1"></div>
-                      <button
-                        onClick={async () => {
-                          localStorage.removeItem("streaming_watchlist");
-                          const supabase = createClient();
-                          await supabase.auth.signOut();
-                          window.location.href = "/";
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-white/10 transition-colors"
-                      >
-                        <LogOut size={16} /> Logout
-                      </button>
+                      
+                      {user ? (
+                        <>
+                          <Link
+                            href="/profile?tab=settings"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
+                          >
+                            <Settings size={16} /> Settings
+                          </Link>
+                          <div className="h-px bg-white/10 my-1"></div>
+                          <button
+                            onClick={async () => {
+                              const supabase = createClient();
+                              await supabase.auth.signOut();
+                              window.location.reload();
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-white/10 transition-colors"
+                          >
+                            <LogOut size={16} /> Logout
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="h-px bg-white/10 my-1"></div>
+                          <Link
+                            href="/login"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-white/10 transition-colors"
+                          >
+                            Login
+                          </Link>
+                          <Link
+                            href="/register"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
+                          >
+                            Register
+                          </Link>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -217,8 +255,27 @@ export default function Navbar({ brandName }: { brandName: string }) {
               onClick={() => setIsMobileMenuOpen(false)}
               className="mt-4 text-xl font-bold text-white bg-red-600 rounded-3xl py-5 px-6 flex items-center justify-center gap-3 shadow-lg transform active:scale-95 transition-transform"
             >
-              <User size={22} /> Go to Profile
+              <User size={22} /> {user ? "Go to Profile" : "Anonymous Profile"}
             </Link>
+            
+            {!user && (
+              <div className="flex gap-3 mt-2">
+                <Link
+                  href="/login"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex-1 text-center font-bold text-white bg-white/10 rounded-2xl py-4 hover:bg-white/20 transition-colors"
+                >
+                  Login
+                </Link>
+                <Link
+                  href="/register"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex-1 text-center font-bold text-white bg-white/10 rounded-2xl py-4 hover:bg-white/20 transition-colors"
+                >
+                  Register
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       )}

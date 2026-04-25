@@ -20,7 +20,16 @@ export async function login(formData: FormData) {
   }
 
   revalidatePath('/', 'layout');
-  redirect('/admin');
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    if (profile?.role === 'super_admin' || profile?.role === 'moderator') {
+      redirect('/admin');
+    }
+  }
+  
+  redirect('/profile');
 }
 
 export async function signup(formData: FormData) {
@@ -45,7 +54,16 @@ export async function signup(formData: FormData) {
   }
 
   revalidatePath('/', 'layout');
-  redirect('/admin');
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    if (profile?.role === 'super_admin' || profile?.role === 'moderator') {
+      redirect('/admin');
+    }
+  }
+  
+  redirect('/profile');
 }
 
 export async function logout() {

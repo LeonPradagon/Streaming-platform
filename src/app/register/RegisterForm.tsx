@@ -72,10 +72,10 @@ export default function RegisterForm() {
               letterSpacing: "-1px",
             }}
           >
-            Registrasi Admin
+            Daftar Akun Baru
           </h1>
           <p style={{ color: "#94a3b8" }}>
-            Daftarkan akun untuk mengelola platform Anda
+            Daftarkan akun untuk menyimpan riwayat dan preferensi tontonan Anda
           </p>
         </div>
 
@@ -172,7 +172,7 @@ export default function RegisterForm() {
                 name="email"
                 type="email"
                 required
-                placeholder="admin@gmail.com"
+                placeholder="email@example.com"
                 style={{
                   width: "100%",
                   padding: "0.8rem 1rem 0.8rem 3rem",
@@ -285,7 +285,7 @@ function SubmitButton() {
         <Loader2 size={20} className="animate-spin" />
       ) : (
         <>
-          Buat Akun Admin <ChevronRight size={18} />
+          Buat Akun Sekarang <ChevronRight size={18} />
         </>
       )}
     </button>

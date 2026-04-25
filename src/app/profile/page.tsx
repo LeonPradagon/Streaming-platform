@@ -15,9 +15,10 @@ function ProfileContent() {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [emailNotif, setEmailNotif] = useState(true);
   const [quality, setQuality] = useState('auto');
-  const [displayName, setDisplayName] = useState('Movie Buff');
+  const [displayName, setDisplayName] = useState('Anonymous');
   const [userEmail, setUserEmail] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
   useEffect(() => {
     async function loadProfile() {
@@ -40,6 +41,7 @@ function ProfileContent() {
           if (profile.preferences.quality !== undefined) setQuality(profile.preferences.quality);
         }
       }
+      setIsLoadingAuth(false);
     }
     loadProfile();
   }, []);
@@ -88,8 +90,8 @@ function ProfileContent() {
                </div>
             </div>
             <h2 className="text-2xl font-black text-white">{displayName}</h2>
-            <p className="text-primary font-bold text-sm mt-1">Premium Plan</p>
-            <p className="text-gray-400 text-xs mt-2">Member since 2024</p>
+            <p className="text-primary font-bold text-sm mt-1">{userId ? "Premium Plan" : "Guest Mode"}</p>
+            <p className="text-gray-400 text-xs mt-2">{userId ? "Member since 2024" : "Local Storage"}</p>
           </div>
 
           {/* Stats */}
@@ -129,20 +131,34 @@ function ProfileContent() {
           </div>
           
           <div className="mt-12 pt-6 border-t border-white/10">
-            <button 
-              onClick={async () => {
-                localStorage.removeItem('streaming_watchlist');
-                localStorage.removeItem('streaming_likes');
-                localStorage.removeItem('streaming_history');
-                const supabase = createClient();
-                await supabase.auth.signOut();
-                showToast('Anda telah keluar', 'info');
-                window.location.href = '/';
-              }}
-              className="flex items-center gap-3 px-4 py-3 text-red-500 font-bold hover:bg-red-500/10 rounded-lg w-full transition"
-            >
-              <LogOut size={18} /> Keluar Akun
-            </button>
+            {userId ? (
+              <button 
+                onClick={async () => {
+                  const supabase = createClient();
+                  await supabase.auth.signOut();
+                  showToast('Anda telah keluar', 'info');
+                  window.location.reload();
+                }}
+                className="flex items-center gap-3 px-4 py-3 text-red-500 font-bold hover:bg-red-500/10 rounded-lg w-full transition"
+              >
+                <LogOut size={18} /> Keluar Akun
+              </button>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <Link 
+                  href="/login"
+                  className="flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg w-full transition"
+                >
+                  Masuk Akun
+                </Link>
+                <Link 
+                  href="/register"
+                  className="flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-red-700 text-white font-bold rounded-lg w-full transition shadow-lg shadow-primary/20"
+                >
+                  Daftar Sekarang
+                </Link>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -227,68 +243,80 @@ function ProfileContent() {
             <div className="animate-fade-in max-w-2xl">
               <h2 className="text-2xl font-bold mb-8 flex items-center gap-3"><Settings className="text-primary"/> Pengaturan Akun</h2>
               
-              <div className="space-y-6">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm text-gray-400 font-bold uppercase tracking-wider">Nama Tampilan</label>
-                  <input 
-                    type="text" 
-                    value={displayName} 
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition" 
-                  />
+              {!isLoadingAuth && !userId ? (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center flex flex-col items-center justify-center min-h-[300px]">
+                  <Settings size={48} className="text-gray-500 mb-4" />
+                  <h3 className="text-xl font-bold text-white mb-2">Login Diperlukan</h3>
+                  <p className="text-gray-400 max-w-sm mb-6">Anda sedang menggunakan mode Anonymous. Silakan login untuk menyimpan pengaturan dan sinkronisasi antar perangkat.</p>
+                  <div className="flex gap-4">
+                    <Link href="/login" className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg transition">Login</Link>
+                    <Link href="/register" className="px-6 py-2.5 bg-primary hover:bg-red-700 text-white font-bold rounded-lg shadow-lg shadow-primary/20 transition">Daftar</Link>
+                  </div>
                 </div>
-                
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm text-gray-400 font-bold uppercase tracking-wider">Email Utama</label>
-                  <input type="email" value={userEmail || "Memuat..."} disabled className="bg-black/80 border border-white/5 rounded-lg px-4 py-3 text-gray-500 cursor-not-allowed" />
-                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm text-gray-400 font-bold uppercase tracking-wider">Nama Tampilan</label>
+                    <input 
+                      type="text" 
+                      value={displayName} 
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition" 
+                    />
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm text-gray-400 font-bold uppercase tracking-wider">Email Utama</label>
+                    <input type="email" value={userEmail || "Memuat..."} disabled className="bg-black/80 border border-white/5 rounded-lg px-4 py-3 text-gray-500 cursor-not-allowed" />
+                  </div>
 
-                <div className="pt-6 border-t border-white/10">
-                  <h3 className="text-lg font-bold mb-4">Preferensi</h3>
-                  <div className="flex items-center justify-between p-4 glass rounded-lg mb-3">
-                    <div>
-                      <p className="font-bold">Notifikasi Email</p>
-                      <p className="text-sm text-gray-400">Terima update tentang film terbaru</p>
+                  <div className="pt-6 border-t border-white/10">
+                    <h3 className="text-lg font-bold mb-4">Preferensi</h3>
+                    <div className="flex items-center justify-between p-4 glass rounded-lg mb-3">
+                      <div>
+                        <p className="font-bold">Notifikasi Email</p>
+                        <p className="text-sm text-gray-400">Terima update tentang film terbaru</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setEmailNotif(!emailNotif);
+                          showToast(emailNotif ? 'Notifikasi email dinonaktifkan' : 'Notifikasi email diaktifkan', 'success');
+                        }}
+                        className={`w-12 h-6 rounded-full relative transition-colors ${emailNotif ? 'bg-primary' : 'bg-gray-600'}`}
+                      >
+                        <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all shadow ${emailNotif ? 'right-0.5' : 'left-0.5'}`}></div>
+                      </button>
                     </div>
+                    <div className="flex items-center justify-between p-4 glass rounded-lg">
+                      <div>
+                        <p className="font-bold">Kualitas Streaming Default</p>
+                        <p className="text-sm text-gray-400">Pilih resolusi otomatis untuk video</p>
+                      </div>
+                      <select 
+                        value={quality}
+                        onChange={(e) => {
+                          setQuality(e.target.value);
+                          showToast(`Kualitas diubah ke ${e.target.value === 'auto' ? 'Otomatis' : e.target.value}`, 'success');
+                        }}
+                        className="bg-black border border-white/20 rounded-md px-3 py-1 font-semibold text-sm outline-none text-white"
+                      >
+                        <option value="auto">Otomatis</option>
+                        <option value="1080p">1080p</option>
+                        <option value="720p">720p</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-6">
                     <button 
-                      onClick={() => {
-                        setEmailNotif(!emailNotif);
-                        showToast(emailNotif ? 'Notifikasi email dinonaktifkan' : 'Notifikasi email diaktifkan', 'success');
-                      }}
-                      className={`w-12 h-6 rounded-full relative transition-colors ${emailNotif ? 'bg-primary' : 'bg-gray-600'}`}
+                      onClick={handleSaveSettings}
+                      className="bg-primary text-white font-bold px-8 py-3 rounded-lg hover:bg-red-700 transition"
                     >
-                      <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all shadow ${emailNotif ? 'right-0.5' : 'left-0.5'}`}></div>
+                      Simpan Perubahan
                     </button>
                   </div>
-                  <div className="flex items-center justify-between p-4 glass rounded-lg">
-                    <div>
-                      <p className="font-bold">Kualitas Streaming Default</p>
-                      <p className="text-sm text-gray-400">Pilih resolusi otomatis untuk video</p>
-                    </div>
-                    <select 
-                      value={quality}
-                      onChange={(e) => {
-                        setQuality(e.target.value);
-                        showToast(`Kualitas diubah ke ${e.target.value === 'auto' ? 'Otomatis' : e.target.value}`, 'success');
-                      }}
-                      className="bg-black border border-white/20 rounded-md px-3 py-1 font-semibold text-sm outline-none text-white"
-                    >
-                      <option value="auto">Otomatis</option>
-                      <option value="1080p">1080p</option>
-                      <option value="720p">720p</option>
-                    </select>
-                  </div>
                 </div>
-
-                <div className="pt-6">
-                  <button 
-                    onClick={handleSaveSettings}
-                    className="bg-primary text-white font-bold px-8 py-3 rounded-lg hover:bg-red-700 transition"
-                  >
-                    Simpan Perubahan
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
