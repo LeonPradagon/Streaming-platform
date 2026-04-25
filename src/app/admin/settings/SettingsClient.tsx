@@ -48,6 +48,7 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
     startTransition(async () => {
       const videospider = formData.get('videospider') === 'on';
       const superembed = formData.get('superembed') === 'on';
+      const moviesapito = formData.get('moviesapito') === 'on';
       const autoApprove = formData.get('auto_approve') === 'on';
       const autoScrape = formData.get('auto_scrape') === 'on';
       const scraperSecret = formData.get('scraper_secret') as string;
@@ -56,6 +57,7 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
       const result = await updateSettings('scraper_config', { 
         videospider_enabled: videospider, 
         superembed_enabled: superembed, 
+        moviesapito_enabled: moviesapito,
         auto_approve: autoApprove,
         auto_scrape_enabled: autoScrape,
         scraper_secret: scraperSecret,
@@ -183,6 +185,10 @@ export default function SettingsClient({ initialSiteConfig, initialScraperConfig
               <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
                 <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">SuperEmbed Provider</span>
                 <input type="checkbox" name="superembed" defaultChecked={initialScraperConfig.superembed_enabled} className="w-5 h-5 accent-sky-400" />
+              </div>
+              <div className="flex justify-between items-center px-2 py-4 border-b border-white/5 group">
+                <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">MoviesAPI.to Provider (Server 3)</span>
+                <input type="checkbox" name="moviesapito" defaultChecked={initialScraperConfig.moviesapito_enabled} className="w-5 h-5 accent-sky-400" />
               </div>
 
               <div className="p-5 bg-sky-500/5 rounded-2xl border border-sky-500/10 flex gap-4">

@@ -214,6 +214,7 @@ export class ScraperService {
       auto_approve: false,
       videospider_enabled: true,
       superembed_enabled: true,
+      moviesapito_enabled: true,
       auto_scrape_enabled: false,
       scraper_secret: '',
       discovery_pages: 3
@@ -722,7 +723,7 @@ export class ScraperService {
     return summary;
   }
 
-  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: { videospider_enabled?: boolean, superembed_enabled?: boolean }) {
+  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: { videospider_enabled?: boolean, superembed_enabled?: boolean, moviesapito_enabled?: boolean }) {
     const isTV = type === 'tv';
     const providers = [];
 
@@ -732,6 +733,10 @@ export class ScraperService {
     
     if (scraperConfig.superembed_enabled) {
       providers.push({ name: 'Server 2', url: `https://vidsrc.pm/embed/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
+    }
+
+    if (scraperConfig.moviesapito_enabled) {
+      providers.push({ name: 'Server 3', url: `https://moviesapi.to/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '-1-1' : ''}` });
     }
 
     for (const p of providers) {

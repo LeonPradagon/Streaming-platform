@@ -33,12 +33,18 @@ export default function VideoPlayer({
     language: string;
   } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [key, setKey] = useState(0); // For forcing iframe reload
+  const [key, setKey] = useState(0);
   const [showSubtitleToast, setShowSubtitleToast] = useState(false);
+
+  // Reset loading when source changes
+  useEffect(() => {
+    setIsLoading(true);
+    setHasError(false);
+    setKey((prev) => prev + 1);
+  }, [src]);
 
   // --- AD BLOCKING LOGIC (Invisible) ---
   useEffect(() => {
-    // 1. window.open override
     const originalOpen = window.open;
     // @ts-ignore
     window.open = function (...args) {
@@ -46,21 +52,17 @@ export default function VideoPlayer({
       return null;
     };
 
-    // 2. Blur/Focus Auto-Kill
     const handleBlur = () => {
-      // Small delay to let the popup attempt to open, then we refocus
       setTimeout(() => {
         window.focus();
-        // If we were in full screen, ensure we stay there if possible
         if (document.fullscreenElement) {
           (document.fullscreenElement as HTMLElement).focus();
         }
       }, 100);
     };
 
-    // 3. beforeunload guard
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Some ad scripts try to redirect the parent page
+      // Guard against ad redirects
     };
 
     window.addEventListener("blur", handleBlur);
@@ -82,23 +84,25 @@ export default function VideoPlayer({
 
   // Timeout to detect "stuck" loading
   useEffect(() => {
-    if (isLoading) {
-      const timer = setTimeout(() => {
-        setHasError(true);
-      }, 25000); // 25 seconds timeout
+    if (!isLoading) return;
 
-      // Secondary faster timeout to just show the iframe even if onLoad didn't fire
-      // Some providers don't trigger onLoad correctly in all browsers
-      const fallbackTimer = setTimeout(() => {
-        setIsLoading(false);
-      }, 10000);
+    // After 8 seconds, force-show the iframe even if onLoad hasn't fired
+    // (many embed providers don't trigger onLoad correctly)
+    const fallbackTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 8000);
 
-      return () => {
-        clearTimeout(timer);
-        clearTimeout(fallbackTimer);
-      };
-    }
-  }, [isLoading]);
+    // After 30 seconds, show the error state
+    const errorTimer = setTimeout(() => {
+      setHasError(true);
+      setIsLoading(false);
+    }, 30000);
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      clearTimeout(errorTimer);
+    };
+  }, [isLoading, key]);
 
   // Fetch subtitles
   useEffect(() => {
@@ -135,7 +139,9 @@ export default function VideoPlayer({
 
         if (payload?.type === "MEDIA_DATA" && payload?.data) {
           const { duration, currentTime } = payload.data;
+          // Video is playing — definitely not loading
           setIsLoading(false);
+          setHasError(false);
 
           if (currentTime > 10 && tmdbId) {
             const now = Date.now();
@@ -168,7 +174,7 @@ export default function VideoPlayer({
           }
         }
       } catch (err) {
-        // Ignore unparseable messages
+        // Ignore unparseable messages from cross-origin iframes
       }
     };
 
@@ -182,44 +188,34 @@ export default function VideoPlayer({
       setShowSubtitleToast(true);
       const timer = setTimeout(() => {
         setShowSubtitleToast(false);
-      }, 5000); // Hide after 5 seconds
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [isLoading, subtitle]);
 
-  // Build final iframe URL with anti-ad params and subtitles
+  // Build final iframe URL with provider-specific params
   const getFinalUrl = (url: string) => {
     try {
       const urlObj = new URL(url);
 
-      urlObj.searchParams.set("autoplay", "1");
-
-      // Comprehensive Subtitle Injection
-      if (subtitle?.url) {
-        // Different providers use different parameters
-        urlObj.searchParams.set("sub", subtitle.url);
-        urlObj.searchParams.set("sub.id", subtitle.url);
-        urlObj.searchParams.set("sub.label", subtitle.language);
-        urlObj.searchParams.set("subtitle", subtitle.url);
-      }
-
-      // 1. VidLink.pro Optimizations
+      // VidLink.pro specific params
       if (url.includes("vidlink")) {
         urlObj.searchParams.set("primaryColor", "E50914");
         urlObj.searchParams.set("secondaryColor", "ffffff");
         urlObj.searchParams.set("iconColor", "ffffff");
-        urlObj.searchParams.set("ads", "0"); // Internal ad-block
+        urlObj.searchParams.set("autoplay", "1");
       }
 
-      // 2. VidSrc Optimizations
-      if (url.includes("vidsrc")) {
-        urlObj.searchParams.set("auto_play", "1");
-        urlObj.searchParams.set("color", "E50914");
+      // VidSrc & MoviesAPI.to specific params
+      if (url.includes("vidsrc") || url.includes("moviesapi.to")) {
+        urlObj.searchParams.set("autoplay", "1");
       }
 
-      // 3. General Anti-Ad / Tracking Parameters
-      urlObj.searchParams.set("iv_load_policy", "3"); // Disable annotations (for YT based embeds)
-      urlObj.searchParams.set("modestbranding", "1");
+      // Subtitle injection (provider-agnostic)
+      if (subtitle?.url) {
+        urlObj.searchParams.set("sub", subtitle.url);
+        urlObj.searchParams.set("subtitle", subtitle.url);
+      }
 
       return urlObj.toString();
     } catch {
@@ -229,27 +225,25 @@ export default function VideoPlayer({
 
   return (
     <div className="video-player-container relative w-full h-full bg-black rounded-inherit overflow-hidden group">
-      <AnimatePresence>
-        <iframe
-          key={key}
-          ref={iframeRef}
-          src={getFinalUrl(src)}
-          title={title}
-          className="absolute inset-0 w-full h-full border-none z-10"
-          style={{
-            opacity: isLoading ? 0 : 1,
-            transition: "opacity 0.8s ease",
-            backgroundColor: "#000",
-          }}
-          allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
-          referrerPolicy="no-referrer"
-          onLoad={() => {
-            // Reduced delay to show the player faster
-            setTimeout(() => setIsLoading(false), 500);
-          }}
-          allowFullScreen
-        />
-      </AnimatePresence>
+      {/* Actual iframe — always mounted, visibility controlled by CSS */}
+      <iframe
+        key={key}
+        ref={iframeRef}
+        src={getFinalUrl(src)}
+        title={title}
+        className="absolute inset-0 w-full h-full border-none z-10"
+        style={{
+          opacity: isLoading ? 0 : 1,
+          transition: "opacity 0.5s ease-in-out",
+          backgroundColor: "#000",
+        }}
+        allow="autoplay; encrypted-media; picture-in-picture; web-share; fullscreen; clipboard-write"
+        referrerPolicy="origin"
+        onLoad={() => {
+          setIsLoading(false);
+        }}
+        allowFullScreen
+      />
 
       {/* Subtitle Status Toast */}
       <AnimatePresence>
@@ -282,14 +276,15 @@ export default function VideoPlayer({
 
       {/* Loading Overlay */}
       <AnimatePresence>
-        {isLoading && (
+        {isLoading && !hasError && (
           <motion.div
+            key="loading"
             initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.4 } }}
             className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]"
           >
             <motion.div
-              className="absolute inset-0 opacity-30 bg-cover bg-center transition-transform duration-[10s]"
+              className="absolute inset-0 opacity-30 bg-cover bg-center"
               style={{
                 backgroundImage: backdrop
                   ? `linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.4)), url(${backdrop})`
@@ -304,52 +299,61 @@ export default function VideoPlayer({
             />
 
             <div className="relative z-10 flex flex-col items-center gap-6">
-              {!hasError ? (
-                <>
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-[#E50914] blur-2xl opacity-20 animate-pulse" />
-                    <Loader2
-                      className="animate-spin text-[#E50914] relative z-10"
-                      size={56}
-                      strokeWidth={3}
-                    />
-                  </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-white font-black tracking-[4px] text-xs uppercase animate-pulse">
-                      Menyiapkan Film...
-                    </span>
-                    <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">
-                      {title}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <motion.div
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className="flex flex-col items-center gap-8 px-8 text-center max-w-sm"
-                >
-                  <div className="w-20 h-20 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
-                    <AlertCircle className="text-zinc-500" size={40} />
-                  </div>
-                  <div className="space-y-3">
-                    <h3 className="text-white font-black text-xl tracking-tight">
-                      Koneksi Agak Lambat?
-                    </h3>
-                    <p className="text-zinc-400 text-sm font-medium leading-relaxed">
-                      Beberapa server membutuhkan waktu ekstra. Coba segarkan
-                      player atau ganti server di samping.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleReload}
-                    className="flex items-center gap-3 bg-white text-black px-10 py-4 rounded-full font-black text-sm hover:scale-105 transition-all active:scale-95 shadow-xl"
-                  >
-                    <RefreshCcw size={18} /> COBA LAGI
-                  </button>
-                </motion.div>
-              )}
+              <div className="relative">
+                <div className="absolute inset-0 bg-[#E50914] blur-2xl opacity-20 animate-pulse" />
+                <Loader2
+                  className="animate-spin text-[#E50914] relative z-10"
+                  size={56}
+                  strokeWidth={3}
+                />
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <span className="text-white font-black tracking-[4px] text-xs uppercase animate-pulse">
+                  Menyiapkan Film...
+                </span>
+                <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">
+                  {title}
+                </span>
+              </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error Overlay */}
+      <AnimatePresence>
+        {hasError && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#0F0F0F]"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="flex flex-col items-center gap-8 px-8 text-center max-w-sm"
+            >
+              <div className="w-20 h-20 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
+                <AlertCircle className="text-zinc-500" size={40} />
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-white font-black text-xl tracking-tight">
+                  Koneksi Agak Lambat?
+                </h3>
+                <p className="text-zinc-400 text-sm font-medium leading-relaxed">
+                  Beberapa server membutuhkan waktu ekstra. Coba segarkan
+                  player atau ganti server di samping.
+                </p>
+              </div>
+              <button
+                onClick={handleReload}
+                className="flex items-center gap-3 bg-white text-black px-10 py-4 rounded-full font-black text-sm hover:scale-105 transition-all active:scale-95 shadow-xl"
+              >
+                <RefreshCcw size={18} /> COBA LAGI
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

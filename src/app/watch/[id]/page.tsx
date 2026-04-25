@@ -81,12 +81,15 @@ export default async function WatchPage({ params, searchParams }: Props) {
   if (error || !content)
     return <div className="text-white p-20 text-center">Content not found</div>;
 
+  // All types that are NOT 'movie' are TV-like (have seasons/episodes)
   const isMovie = content.type === "movie";
+  // For TMDB API calls, we need only 'movie' or 'tv'
+  const tmdbType = isMovie ? "movie" : "tv";
 
   // ⚡ PERFORMANCE: Run ALL data fetches in parallel
   const [linksResult, metadataResult, seasonsResult] = await Promise.all([
     supabase.from("embed_links").select("*").eq("content_id", id).order("provider", { ascending: true }),
-    fetchTMDBMetadata(content.tmdb_id, !isMovie ? "tv" : "movie"),
+    fetchTMDBMetadata(content.tmdb_id, tmdbType),
     !isMovie 
       ? supabase.from("seasons").select("*").eq("content_id", id).order("season_number", { ascending: true })
       : Promise.resolve({ data: null }),
@@ -107,6 +110,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
     finalUrl.includes("vidsrc") ||
     finalUrl.includes("embed.su") ||
     finalUrl.includes("vidlink") ||
+    finalUrl.includes("moviesapi.to") ||
     finalUrl.includes("jenius");
 
   if (isVideoProvider) {
@@ -119,7 +123,14 @@ export default async function WatchPage({ params, searchParams }: Props) {
       finalUrl = isMovie
         ? `${baseUrl}${queryString}`
         : `${baseUrl}/${currentSeason}/${currentEpisode}${queryString}`;
+    } else if (urlWithoutQuery.includes("moviesapi.to")) {
+      const type = isMovie ? "/movie/" : "/tv/";
+      const baseUrl = urlWithoutQuery.split(type)[0] + type + content.tmdb_id;
+      finalUrl = isMovie
+        ? `${baseUrl}${queryString}`
+        : `${baseUrl}-${currentSeason}-${currentEpisode}${queryString}`;
     } else {
+      // Logic for vidsrc, embed.su (using /embed/)
       const type = urlWithoutQuery.includes("tv") ? "tv/" : "movie/";
       const baseUrl =
         urlWithoutQuery.split("/embed/")[0] +
@@ -234,9 +245,9 @@ export default async function WatchPage({ params, searchParams }: Props) {
                 <div className="flex items-center gap-1">
                   <Clock size={16} />
                   <span className="uppercase">
-                    {content.type === "tv"
-                      ? `Series • ${metadata?.status === "Ended" || metadata?.status === "Canceled" ? "Completed" : "Ongoing"}`
-                      : content.type}
+                    {isMovie
+                      ? "Movie"
+                      : `${content.type === 'tv' ? 'Series' : content.type === 'anime' ? 'Anime' : content.type === 'drakor' ? 'K-Drama' : content.type === 'drachin' ? 'C-Drama' : content.type === 'donghua' ? 'Donghua' : content.type === 'variety' ? 'Variety' : content.type === 'drathai' ? 'Thai Drama' : content.type === 'drajep' ? 'J-Drama' : 'Series'} • ${metadata?.status === "Ended" || metadata?.status === "Canceled" ? "Completed" : "Ongoing"}`}
                   </span>
                 </div>
                 <div className="px-2 py-0.5 border border-gray-500 rounded text-xs font-bold text-gray-400">
@@ -324,7 +335,8 @@ export default async function WatchPage({ params, searchParams }: Props) {
                     {link.provider
                       .replace(" (Main)", "")
                       .replace(" (Stabile)", "")
-                      .replace(" (Mirror)", "")}
+                      .replace(" (Mirror)", "")
+                      .replace(" (Auto)", "")}
                   </Link>
                 ))}
               </div>
