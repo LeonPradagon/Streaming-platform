@@ -84,14 +84,14 @@ export class ScraperService {
    * Cleanup tasks that have been 'running' for more than 10 minutes
    */
   private async cleanupStaleTasks() {
-    const sixtyMinutesAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
     // 1. Get stale tasks from DB
     const { data: staleTasks } = await supabase
       .from('scraper_logs')
       .select('task_name')
       .eq('status', 'running')
-      .lt('created_at', sixtyMinutesAgo);
+      .lt('created_at', tenMinutesAgo);
 
     if (staleTasks && staleTasks.length > 0) {
       console.log(`[Scraper] Cleaning up ${staleTasks.length} stale tasks...`);
@@ -100,10 +100,10 @@ export class ScraperService {
         .from('scraper_logs')
         .update({ 
           status: 'failed', 
-          error_message: 'Task timed out (stale task auto-cleanup 60m)' 
+          error_message: 'Task timed out (stale task auto-cleanup 10m)' 
         })
         .eq('status', 'running')
-        .lt('created_at', sixtyMinutesAgo);
+        .lt('created_at', tenMinutesAgo);
     }
   }
 
@@ -397,6 +397,7 @@ export class ScraperService {
                 vote_average: metadata.vote_average,
                 popularity: item.popularity || metadata.popularity || 0,
                 release_date: metadata.release_date || metadata.first_air_date,
+                tv_status: metadata.status,
                 is_healthy: true
               }, { onConflict: 'tmdb_id' })
               .select().single();
@@ -494,6 +495,7 @@ export class ScraperService {
               vote_average: metadata.vote_average,
               popularity: item.popularity || metadata.popularity || 0,
               release_date: metadata.release_date || metadata.first_air_date,
+              tv_status: metadata.status,
               is_healthy: true
             }, { onConflict: 'tmdb_id' })
             .select().single();
@@ -627,7 +629,8 @@ export class ScraperService {
             backdrop_path: metadata.backdrop_path,
             vote_average: metadata.vote_average,
             popularity: metadata.popularity || 0,
-            release_date: metadata.release_date || metadata.first_air_date
+            release_date: metadata.release_date || metadata.first_air_date,
+            tv_status: metadata.status
           }).eq('id', item.id);
 
           if (tmdbType !== 'movie') {
@@ -869,6 +872,7 @@ export class ScraperService {
           vote_average: metadata.vote_average,
           popularity: item.popularity || metadata.popularity || 0,
           release_date: metadata.release_date || metadata.first_air_date,
+          tv_status: metadata.status,
           is_healthy: true
         }, { onConflict: 'tmdb_id' }).select().single();
 
@@ -954,14 +958,20 @@ export class ScraperService {
         const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
         const metadata: any = await resMetadata.json();
         
+        const finalType = classifyContentType(metadata, tmdbType);
+        const platform = classifyPlatform(metadata, finalType);
+
         await supabase.from('contents').update({
+          type: finalType,
+          platform,
           genre_names: metadata.genres?.map((g: any) => g.name) || [],
           cast_data: metadata.credits?.cast?.slice(0, 10) || [],
           overview: metadata.overview,
           poster_path: metadata.poster_path,
           backdrop_path: metadata.backdrop_path,
           vote_average: metadata.vote_average,
-          release_date: metadata.release_date || metadata.first_air_date
+          release_date: metadata.release_date || metadata.first_air_date,
+          tv_status: metadata.status
         }).eq('id', item.id);
 
         if (tmdbType === 'tv') await this.scrapeTVDetails(item.id, item.tmdb_id);

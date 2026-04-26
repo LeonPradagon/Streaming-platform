@@ -97,6 +97,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const secret = searchParams.get('secret');
+    const task = searchParams.get('task') || 'scrape'; // Default to scrape if not specified
     
     const supabase = await createClient();
     const { data: sData, error: sError } = await supabase.from('settings').select('value').eq('key', 'scraper_config').single();
@@ -127,23 +128,37 @@ export async function GET(req: Request) {
     const scraper = ScraperService.getInstance();
     const intensity = scraperConfig.discovery_pages || 3;
     
-    // 1. Fetch persistent cron state
-    const { data: cronStateData } = await supabase.from('settings').select('value').eq('key', 'cron_state').single();
+    // 1. Fetch persistent cron state (unique per task to avoid collision)
+    const stateKey = `cron_state_${task}`;
+    const { data: cronStateData } = await supabase.from('settings').select('value').eq('key', stateKey).single();
     let cronState = cronStateData?.value || {};
 
     let logId = cronState.logId;
     if (!logId) {
        // Start of a brand new automated task
-       logId = await scraper.createLog('Automated Discovery (CRON)');
+       logId = await scraper.createLog(`Automated ${task.toUpperCase()} (CRON)`);
        if (!logId) {
           return NextResponse.json({ error: 'Another task is already running' }, { status: 400 });
        }
        cronState.logId = logId;
     }
 
-    // 2. Execute ONE chunk
-    console.log(`[Scraper API] Executing CRON chunk (Intensity: ${intensity})`);
-    const result = await scraper.runDiscoveryChunk(intensity, cronState);
+    // 2. Execute ONE chunk based on task type
+    console.log(`[Scraper API] Executing CRON ${task} chunk`);
+    let result: any;
+    if (task === 'scrape') {
+      result = await scraper.runDiscoveryChunk(intensity, cronState);
+    } else if (task === 'trending') {
+      result = await scraper.runTrendingChunk(cronState);
+    } else if (task === 'validate') {
+      result = await scraper.runHealthCheckChunk(cronState);
+    } else if (task === 'sync') {
+      result = await scraper.runSyncMetadataChunk(cronState);
+    } else if (task === 'subtitles') {
+      result = await scraper.runSyncSubtitlesChunk(cronState);
+    } else {
+      return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
+    }
 
     // 3. Accumulate summary
     const accumulatedProcessed = (cronState.accumulatedProcessed || 0) + (result.summary?.items_processed || 0);
@@ -174,10 +189,10 @@ export async function GET(req: Request) {
             accumulatedAdded,
             accumulatedFailed
         };
-        await supabase.from('settings').upsert({ key: 'cron_state', value: nextStateToSave }, { onConflict: 'key' });
+        await supabase.from('settings').upsert({ key: stateKey, value: nextStateToSave }, { onConflict: 'key' });
     } else {
         // Task completely finished, wipe the state so it starts fresh next time
-        await supabase.from('settings').delete().eq('key', 'cron_state');
+        await supabase.from('settings').delete().eq('key', stateKey);
     }
 
     return NextResponse.json({ 

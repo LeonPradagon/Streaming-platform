@@ -5,33 +5,39 @@ import { Flame } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 
 export default async function TrendingPage() {
-  // ⚡ PERFORMANCE: Parallel fetch content + settings
-  const [contentResult, settingsResult] = await Promise.all([
-    supabase
-      .from('contents')
-      .select('id, tmdb_id, title, type, poster_path, vote_average, popularity, release_date')
-      .eq('status', 'approved')
-      .order('popularity', { ascending: false, nullsFirst: false })
-      .limit(40),
+  // ⚡ PERFORMANCE: Parallel fetch categories for a mixed trending experience
+  const [moviesRes, drakorRes, animeRes, settingsResult] = await Promise.all([
+    supabase.from('contents').select('id, tmdb_id, title, type, poster_path, vote_average, popularity, release_date').eq('status', 'approved').eq('type', 'movie').order('popularity', { ascending: false }).limit(20),
+    supabase.from('contents').select('id, tmdb_id, title, type, poster_path, vote_average, popularity, release_date').eq('status', 'approved').eq('type', 'drakor').order('popularity', { ascending: false }).limit(20),
+    supabase.from('contents').select('id, tmdb_id, title, type, poster_path, vote_average, popularity, release_date').eq('status', 'approved').in('type', ['anime', 'donghua']).order('popularity', { ascending: false }).limit(20),
     supabase.from('settings').select('value').eq('key', 'site_config').single(),
   ]);
 
-  const dbContents = contentResult.data;
-  const error = contentResult.error;
   const siteConfig = settingsResult.data?.value || { title: 'Netix' };
-
-  let validResults: any[] = [];
-  if (!error && dbContents) {
-    validResults = dbContents.map((item) => ({
-      ...item,
-      metadata: {
-        poster_path: item.poster_path,
-        vote_average: typeof item.vote_average === 'number' ? item.vote_average : parseFloat(item.vote_average || '0'),
-        release_date: item.release_date,
-        first_air_date: item.release_date,
-      }
-    }));
+  
+  // Interleave the results for variety
+  const movies = moviesRes.data || [];
+  const drakors = drakorRes.data || [];
+  const animes = animeRes.data || [];
+  
+  const mixedResults: any[] = [];
+  const maxLen = Math.max(movies.length, drakors.length, animes.length);
+  
+  for (let i = 0; i < maxLen; i++) {
+    if (movies[i]) mixedResults.push(movies[i]);
+    if (drakors[i]) mixedResults.push(drakors[i]);
+    if (animes[i]) mixedResults.push(animes[i]);
   }
+
+  const validResults = mixedResults.map((item) => ({
+    ...item,
+    metadata: {
+      poster_path: item.poster_path,
+      vote_average: typeof item.vote_average === 'number' ? item.vote_average : parseFloat(item.vote_average || '0'),
+      release_date: item.release_date,
+      first_air_date: item.release_date,
+    }
+  }));
 
   return (
     <div className="min-h-screen pt-28 px-4 md:px-12 lg:px-20 animate-fade-in relative z-10 pb-20">

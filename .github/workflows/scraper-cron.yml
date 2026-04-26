@@ -18,6 +18,7 @@ jobs:
           echo "Triggering scraper chunk at https://$CLEAN_URL/api/scraper/run"
           
           # Gunakan GET untuk memicu 1 chunk per pemanggilan.
-          # Sistem akan membaca state terakhir dari database secara otomatis.
-          curl -s -f "https://$CLEAN_URL/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}&task=scrape"
+          # --max-time 240: Tunggu maksimal 4 menit (Vercel timeout 5m)
+          # --retry 2: Coba lagi jika gagal koneksi
+          curl -s -f --max-time 240 --retry 2 "https://$CLEAN_URL/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}&task=scrape"
 

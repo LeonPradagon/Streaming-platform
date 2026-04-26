@@ -48,14 +48,17 @@ export default function ContentRow({
   return (
     <div className="relative group/section w-full px-4 md:px-10 lg:px-14 max-w-[2000px] mx-auto mb-10 mt-4 z-10">
       {/* Title Area - Elegant Minimal */}
-      <div className="px-2 md:px-4 mb-3 flex items-center justify-between">
-        <h2 className="text-sm md:text-base font-bold text-white/90 uppercase tracking-widest flex items-center gap-2 border-l-[3px] border-[#E50914] pl-3 py-0.5 drop-shadow-sm font-sans hover:text-white cursor-pointer transition-colors">
-          {title}
-        </h2>
+      <div className="px-2 md:px-4 mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {icon && <div className="text-red-600 drop-shadow-[0_0_10px_rgba(229,9,20,0.5)]">{icon}</div>}
+          <h2 className="text-base md:text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2 font-sans hover:text-red-500 cursor-pointer transition-colors italic">
+            {title}
+          </h2>
+        </div>
         {/* Simple "See All" link style */}
         {viewAllHref && (
-          <Link href={viewAllHref} className="text-[10px] md:text-xs font-semibold text-gray-400 hover:text-white transition-colors hover:bg-white/5 px-2 md:px-3 py-1 rounded-sm border border-white/10 flex items-center gap-1">
-            VIEW ALL <ChevronRight size={14} className="-mr-1 opacity-70" />
+          <Link href={viewAllHref} className="text-[10px] md:text-xs font-black text-gray-500 hover:text-white transition-all hover:bg-white/5 px-4 py-2 rounded-full border border-white/5 uppercase tracking-widest flex items-center gap-2">
+            View All <ChevronRight size={14} className="opacity-50" />
           </Link>
         )}
       </div>
