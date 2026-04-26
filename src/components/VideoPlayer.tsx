@@ -13,6 +13,7 @@ interface VideoPlayerProps {
   mediaType?: "movie" | "tv";
   season?: number;
   episode?: number;
+  externalSubtitle?: string;
 }
 
 export default function VideoPlayer({
@@ -23,6 +24,7 @@ export default function VideoPlayer({
   mediaType,
   season,
   episode,
+  externalSubtitle,
 }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -165,16 +167,31 @@ export default function VideoPlayer({
     try {
       const urlObj = new URL(url);
 
-      // Autoplay for providers that support it
-      if (url.includes('videasy') || url.includes('vidlink')) {
+      // Videasy specific: Set theme color to match NETIX (Red)
+      if (url.includes('videasy')) {
+        urlObj.searchParams.set('color', 'E50914');
         urlObj.searchParams.set('autoplay', '1');
+        if (externalSubtitle) {
+          urlObj.searchParams.set('sub', externalSubtitle);
+          urlObj.searchParams.set('sub_url', externalSubtitle);
+          urlObj.searchParams.set('subtitle_url', externalSubtitle);
+        }
       }
 
-      // VidLink specific styling
+      // VidLink specific: Auto Subtitle & Styling
       if (url.includes('vidlink')) {
+        urlObj.searchParams.set('autoplay', '1');
+        urlObj.searchParams.set('sub_lang', 'Indonesian');
         urlObj.searchParams.set('primaryColor', 'E50914');
         urlObj.searchParams.set('secondaryColor', 'ffffff');
         urlObj.searchParams.set('iconColor', 'ffffff');
+      }
+
+      // MoviesAPI specific: Append scraped subtitle
+      if (url.includes('moviesapi.to')) {
+        if (externalSubtitle) {
+          urlObj.searchParams.set('sub', externalSubtitle);
+        }
       }
 
       return urlObj.toString();

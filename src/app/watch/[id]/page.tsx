@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
 import WatchActions from "@/components/WatchActions";
+import SeasonSelector from "@/components/SeasonSelector";
 
 import type { Metadata, ResolvingMetadata } from "next";
 
@@ -98,11 +99,17 @@ export default async function WatchPage({ params, searchParams }: Props) {
       : Promise.resolve({ data: null }),
   ]);
 
-  // Filter out deprecated providers from the database results
-  const ALLOWED_PROVIDERS = ['VidLink', 'MoviesAPI', 'Videasy'];
-  const links = linksResult.data?.filter(link => 
-    ALLOWED_PROVIDERS.some(allowed => link.provider?.toLowerCase().includes(allowed.toLowerCase()))
-  ) || [];
+  // Define priority order for providers
+  const PROVIDER_PRIORITY = ['Videasy', 'MoviesAPI', 'VidLink'];
+  
+  const links = (linksResult.data || [])
+    .filter(link => PROVIDER_PRIORITY.some(p => link.provider?.toLowerCase().includes(p.toLowerCase())))
+    .sort((a, b) => {
+      const aIndex = PROVIDER_PRIORITY.findIndex(p => a.provider?.toLowerCase().includes(p.toLowerCase()));
+      const bIndex = PROVIDER_PRIORITY.findIndex(p => b.provider?.toLowerCase().includes(p.toLowerCase()));
+      return aIndex - bIndex;
+    });
+
   const metadata = metadataResult;
   const seasons = seasonsResult.data;
 
@@ -187,6 +194,23 @@ export default async function WatchPage({ params, searchParams }: Props) {
         .order("episode_number", { ascending: true })
     : { data: [] };
 
+  // 🎬 NEW: Fetch Subtitles (Scraped or Cached)
+  let externalSubtitle = "";
+  try {
+    const { SubtitleService } = await import("@/services/SubtitleService");
+    const subResult = await SubtitleService.fetchAndUploadSubtitle(
+      content.tmdb_id, 
+      isMovie ? 'movie' : 'tv',
+      !isMovie ? String(currentSeason) : undefined,
+      !isMovie ? String(currentEpisode) : undefined
+    );
+    if (subResult.url) {
+      externalSubtitle = subResult.url;
+    }
+  } catch (err) {
+    console.error("[WatchPage] Subtitle Fetch Error:", err);
+  }
+
   const nextEpisode = !isMovie && episodes?.find(ep => ep.episode_number === currentEpisode + 1);
   const nextEpisodeUrl = nextEpisode 
     ? `/watch/${id}?s=${currentServerIndex}&e=${nextEpisode.episode_number}&ss=${currentSeason}`
@@ -198,137 +222,96 @@ export default async function WatchPage({ params, searchParams }: Props) {
     : undefined;
 
   return (
-    <div className="min-h-screen bg-background text-foreground relative overflow-hidden animate-fade-in">
-      {/* Cinematic Backdrop */}
-      <div
-        className="absolute top-0 left-0 w-full h-[60vh] md:h-[80vh] bg-cover bg-center opacity-30 z-0 pointer-events-none"
-        style={{
-          backgroundImage: `url(${getTMDBImageUrl(metadata?.backdrop_path || "", "original")})`,
-          maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-        }}
-      />
+    <div className="min-h-screen bg-[#0a0a0a] text-white relative overflow-x-hidden">
+      {/* Cinematic Ambient Backdrop */}
+      <div className="absolute top-0 left-0 w-full h-[100vh] pointer-events-none z-0">
+        <div 
+          className="absolute inset-0 opacity-40 grayscale-[0.2]"
+          style={{
+            backgroundImage: `url(${getTMDBImageUrl(metadata?.backdrop_path || "", "original")})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center 20%',
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/80 to-[#0a0a0a]/40" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(229,9,20,0.15),transparent_70%)]" />
+      </div>
 
-      <main className="relative z-10 pt-28 px-4 md:px-12 lg:px-20 max-w-[1600px] mx-auto pb-32">
-        {/* Breadcrumb / Back button */}
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 font-semibold transition"
-        >
-          <ChevronLeft size={20} /> Kembali ke Beranda
-        </Link>
-        <div className="text-sm text-gray-500 font-semibold mb-6">
-          {content.title}{" "}
-          {!isMovie && episodes && episodes.length > 0
-            ? `• S${currentSeason} E${currentEpisode}`
-            : ""}
+      <main className="relative z-10 pt-24 md:pt-32 px-4 md:px-12 lg:px-20 max-w-[1700px] mx-auto pb-32">
+        {/* Navigation & Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
+          <div className="space-y-2">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-gray-400 hover:text-white mb-2 font-bold transition-all group"
+            >
+              <div className="p-1.5 rounded-full bg-white/5 border border-white/10 group-hover:bg-red-600 group-hover:border-red-500 transition-all">
+                <ChevronLeft size={16} />
+              </div>
+              Kembali
+            </Link>
+            <h1 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter leading-tight uppercase">
+              {content.title}
+            </h1>
+            {!isMovie && episodes && episodes.length > 0 && (
+              <div className="flex items-center gap-2 text-red-500 font-black tracking-widest text-xs uppercase">
+                <span className="bg-red-600/10 px-2 py-1 rounded border border-red-500/20">Season {currentSeason}</span>
+                <span className="bg-white/10 text-white px-2 py-1 rounded border border-white/10">Episode {currentEpisode}</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-8 lg:gap-12 items-start">
-          {/* Left Column: Player & Info */}
-          <section>
-            {/* Player Container */}
-            <div 
-              className="w-full relative rounded-xl md:rounded-2xl overflow-hidden shadow-2xl shadow-black/50 border border-white/10 bg-black mx-auto"
-              style={{
-                maxWidth: 'calc(75vh * 16 / 9)',
-                aspectRatio: '16/9'
-              }}
-            >
-              {activeLink ? (
-                <VideoPlayer
-                  src={finalUrl}
-                  title={content.title}
-                  backdrop={getTMDBImageUrl(
-                    metadata?.backdrop_path || "",
-                    "original",
-                  )}
-                  tmdbId={content.tmdb_id}
-                  season={isMovie ? undefined : currentSeason}
-                  episode={isMovie ? undefined : currentEpisode}
-                />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-5 relative">
-                  <div className="w-20 h-20 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                    <Play size={36} className="text-zinc-600 ml-1" />
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 lg:gap-12">
+          {/* Main Content Area */}
+          <div className="space-y-10">
+            {/* Player Section */}
+            <div className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-indigo-600 rounded-[2rem] blur opacity-20 group-hover:opacity-30 transition duration-1000" />
+              <div className="relative aspect-video w-full rounded-[1.5rem] md:rounded-[2rem] overflow-hidden bg-black border border-white/10 shadow-2xl z-10">
+                {activeLink ? (
+                  <VideoPlayer
+                    src={finalUrl}
+                    title={content.title}
+                    backdrop={getTMDBImageUrl(metadata?.backdrop_path || "", "original")}
+                    tmdbId={content.tmdb_id}
+                    season={isMovie ? undefined : currentSeason}
+                    episode={isMovie ? undefined : currentEpisode}
+                    externalSubtitle={externalSubtitle}
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-6">
+                    <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center animate-pulse">
+                      <Play size={40} className="text-gray-600 ml-1" />
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-xl font-black mb-2">PILIH SERVER</h3>
+                      <p className="text-gray-500 text-sm">Pilih server di sebelah kanan untuk memulai</p>
+                    </div>
                   </div>
-                  <div className="text-center space-y-2">
-                    <h3 className="font-bold text-white text-lg">
-                      Pilih Server untuk Menonton
-                    </h3>
-                    <p className="text-zinc-500 text-sm max-w-xs">
-                      Pilih salah satu server di panel kanan untuk mulai memutar video.
-                    </p>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
-            {/* Content Info (Below Player) */}
-            <div className="mt-8">
-              {/* Episode Navigation Bar */}
-              {!isMovie && (prevEpisodeUrl || nextEpisodeUrl) && (
-                <div className="flex items-center justify-between gap-3 mb-8 bg-white/5 p-2 rounded-2xl border border-white/5">
-                  {prevEpisodeUrl ? (
-                    <Link href={prevEpisodeUrl} className="flex-1 flex justify-center items-center gap-2 py-3 px-4 rounded-xl hover:bg-white/10 text-white font-bold text-[10px] md:text-xs uppercase tracking-widest transition">
-                      <ChevronLeft size={16} className="text-zinc-400" /> Prev Episode
-                    </Link>
-                  ) : <div className="flex-1"></div>}
-                  
-                  <div className="w-px h-6 bg-white/10 shrink-0"></div>
-                  
-                  {nextEpisodeUrl ? (
-                    <Link href={nextEpisodeUrl} className="flex-1 flex justify-center items-center gap-2 py-3 px-4 rounded-xl hover:bg-white/10 text-white font-bold text-[10px] md:text-xs uppercase tracking-widest transition group">
-                      Next Episode <ChevronRight size={16} className="text-primary group-hover:translate-x-1 transition-transform" />
-                    </Link>
-                  ) : <div className="flex-1"></div>}
+            {/* Quick Actions & Meta */}
+            <div className="flex flex-wrap items-center justify-between gap-6 p-6 rounded-[2rem] bg-white/5 border border-white/10 backdrop-blur-xl">
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2 text-yellow-500 font-black">
+                  <Star size={20} fill="currentColor" />
+                  <span className="text-2xl">{metadata?.vote_average?.toFixed(1) || "N/A"}</span>
                 </div>
-              )}
-
-              <h1 className="text-2xl md:text-5xl font-black mb-4 tracking-tight drop-shadow-md">
-                {content.title}
-              </h1>
-
-              <div className="flex flex-wrap items-center gap-3 text-sm md:text-base font-semibold text-gray-300 mb-6">
-                {content.platform && content.platform !== 'other' && (
-                  <span 
-                    className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider text-white shadow-lg"
-                    style={{ backgroundColor: PLATFORM_COLORS[content.platform as Platform] || '#E50914' }}
-                  >
-                    {PLATFORM_LABELS[content.platform as Platform] || content.platform}
-                  </span>
-                )}
-                <div className="flex items-center gap-1 text-yellow-400">
-                  <Star size={16} fill="currentColor" />
-                  <span>{metadata?.vote_average?.toFixed(1) || "N/A"}</span>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Release</span>
+                  <span className="font-bold">{(metadata?.first_air_date || metadata?.release_date || "").split("-")[0]}</span>
                 </div>
-                <span className="text-gray-700">|</span>
-                <div className="flex items-center gap-1">
-                  <Calendar size={16} className="text-gray-500" />
-                  <span>
-                    {(metadata?.first_air_date || metadata?.release_date || "").split("-")[0]}
-                  </span>
-                </div>
-                <span className="text-gray-700">|</span>
-                <span className="bg-primary/20 text-primary text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border border-primary/20">
-                   {isMovie ? "Movie" : `${content.type === 'drakor' ? 'K-Drama' : content.type === 'drachin' ? 'C-Drama' : content.type === 'anime' ? 'Anime' : content.type === 'donghua' ? 'Donghua' : content.type === 'variety' ? 'Variety' : content.type === 'drathai' ? 'Thai Drama' : content.type === 'drajep' ? 'J-Drama' : 'Series'}`}
-                </span>
-                <div className="px-2 py-0.5 border border-gray-700 rounded text-[10px] font-black text-gray-400 uppercase tracking-widest bg-white/5">
-                  {content.quality || 'HD'}
+                <div className="h-8 w-px bg-white/10" />
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Quality</span>
+                  <span className="font-bold text-red-500">{content.quality || '4K ULTRA HD'}</span>
                 </div>
               </div>
-
-              <div className="flex gap-2 mb-6 flex-wrap">
-                {metadata?.genres?.map((g: { id: number; name: string }) => (
-                  <span
-                    key={g.id}
-                    className="px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/10 transition cursor-default"
-                  >
-                    {g.name}
-                  </span>
-                ))}
-              </div>
-
+              
               <WatchActions
                 item={{
                   id: String(content.id),
@@ -340,156 +323,128 @@ export default async function WatchPage({ params, searchParams }: Props) {
                   first_air_date: metadata?.first_air_date,
                 }}
               />
+            </div>
 
-              {/* Cast Section */}
-              {metadata?.credits?.cast && metadata.credits.cast.length > 0 && (
-                <div className="border-t border-white/10 pt-8 mt-8">
-                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                    <Star size={20} className="text-yellow-500" /> Pemain Utama
-                  </h3>
-                  <div className="flex gap-6 overflow-x-auto pb-4 custom-scrollbar">
-                    {metadata.credits.cast.slice(0, 15).map((actor) => (
-                      <div key={actor.id} className="flex-shrink-0 w-20 md:w-24 group cursor-default">
-                        <div className="aspect-square rounded-full overflow-hidden bg-white/5 border border-white/5 group-hover:border-yellow-500/50 transition-all duration-300 relative">
-                          <img 
-                            src={actor.profile_path ? getTMDBImageUrl(actor.profile_path, 'w185') : `https://placehold.co/200x200/060d17/64748b?text=${actor.name.charAt(0)}`}
-                            alt={actor.name}
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                            loading="lazy"
-                          />
-                        </div>
-                        <div className="mt-3 text-center">
-                          <div className="text-[10px] md:text-xs font-bold text-white line-clamp-1 group-hover:text-yellow-500 transition-colors">{actor.name}</div>
-                          <div className="text-[9px] md:text-[10px] text-gray-500 line-clamp-1 mt-0.5">{actor.character}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="border-t border-white/10 pt-8 mt-8">
-                <h3 className="text-xl font-bold mb-3">Sinopsis</h3>
-                <p className="text-gray-400 leading-relaxed text-lg max-w-4xl">
-                  {metadata?.overview || "Sinopsis tidak tersedia."}
+            {/* Info & Cast Tabs (simplified for 2025) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              <div className="space-y-6">
+                <h3 className="text-xl font-black tracking-widest uppercase flex items-center gap-3">
+                  <div className="w-2 h-8 bg-red-600 rounded-full" /> Sinopsis
+                </h3>
+                <p className="text-gray-400 leading-relaxed font-medium text-lg">
+                  {metadata?.overview || "Sinopsis tidak tersedia untuk judul ini."}
                 </p>
+                <div className="flex flex-wrap gap-2 pt-4">
+                  {metadata?.genres?.map((g: any) => (
+                    <span key={g.id} className="px-4 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-all cursor-default">
+                      {g.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <h3 className="text-xl font-black tracking-widest uppercase flex items-center gap-3">
+                  <div className="w-2 h-8 bg-indigo-600 rounded-full" /> Pemain Utama
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {metadata?.credits?.cast?.slice(0, 6).map((actor: any) => (
+                    <div key={actor.id} className="flex items-center gap-3 p-2 rounded-2xl bg-white/5 border border-white/10 group hover:bg-white/10 transition-all">
+                      <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 border border-white/20">
+                        <img 
+                          src={actor.profile_path ? getTMDBImageUrl(actor.profile_path, 'w185') : `https://placehold.co/100x100/1a1a1a/ffffff?text=${actor.name.charAt(0)}`}
+                          alt={actor.name}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-black truncate">{actor.name}</div>
+                        <div className="text-[9px] text-gray-500 font-bold truncate uppercase tracking-tighter">{actor.character}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </section>
+          </div>
 
-          {/* Right Column: Servers & Episodes */}
-          <aside className="flex flex-col gap-6 w-full max-w-full">
-            {/* Servers Selector */}
-            <div className="glass p-5 md:p-6 rounded-2xl w-full box-border border-white/10">
-              <h3 className="font-bold flex items-center gap-2 mb-4 text-primary opacity-90">
-                <Server size={18} /> Pilihan Server
-              </h3>
-              <div className="flex flex-wrap gap-2">
+          {/* Right Column (Sidebar) */}
+          <aside className="space-y-8">
+            {/* Server Selection */}
+            <div className="p-8 rounded-[2rem] bg-white/5 border border-white/10 backdrop-blur-3xl space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-red-600/20 text-red-500">
+                  <Server size={20} />
+                </div>
+                <h3 className="text-lg font-black tracking-widest uppercase">Pilih Server</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 {links?.map((link, idx) => (
                   <Link
                     key={link.id}
                     href={`/watch/${id}?s=${idx}&e=${currentEpisode}&ss=${currentSeason}`}
-                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                    className={`p-4 rounded-2xl text-center transition-all duration-300 font-black text-xs uppercase tracking-widest border ${
                       currentServerIndex === idx
-                        ? "bg-primary text-white shadow-lg shadow-primary-glow border border-primary"
-                        : "bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10"
+                        ? "bg-red-600 border-red-500 text-white shadow-lg shadow-red-600/20 scale-105"
+                        : "bg-white/5 border-white/10 text-gray-500 hover:text-white hover:bg-white/10"
                     }`}
                   >
-                    {link.provider
-                      .replace(" (Main)", "")
-                      .replace(" (Stabile)", "")
-                      .replace(" (Mirror)", "")
-                      .replace(" (Auto)", "")}
+                    {link.provider.replace(/\(.*\)/g, '').trim()}
                   </Link>
                 ))}
               </div>
-              <div className="mt-4 p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs text-gray-400 leading-relaxed">
-                <span className="text-primary font-bold">Tips:</span> Gunakan
-                DNS 1.1.1.1 atau VPN jika video lambat atau diblokir.
+              <div className="p-4 rounded-2xl bg-indigo-600/10 border border-indigo-600/20">
+                <p className="text-[10px] font-bold text-indigo-400 leading-relaxed uppercase tracking-widest text-center">
+                   Tips: Jika loading lambat, coba ganti server lain atau gunakan VPN.
+                </p>
               </div>
             </div>
 
-            {/* Episode List for Series */}
+            {/* Episode List (TV Only) */}
             {!isMovie && (
-              <div className="glass p-5 md:p-6 rounded-2xl w-full box-border border-white/10">
-                <div className="flex flex-col gap-6">
-                  {/* Season Selector */}
-                  <div>
-                    <h3 className="font-bold flex items-center gap-2 mb-4 text-primary opacity-90">
-                      <List size={18} /> Season
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {seasons?.map((season) => (
-                        <Link
-                          key={season.id}
-                          href={`/watch/${id}?s=${currentServerIndex}&e=1&ss=${season.season_number}`}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all border whitespace-nowrap ${
-                            currentSeason === season.season_number
-                              ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
-                              : "bg-white/5 text-gray-400 border-white/5 hover:bg-white/10"
-                          }`}
-                        >
-                          Season {season.season_number}
-                        </Link>
-                      ))}
+              <div className="p-8 rounded-[2rem] bg-white/5 border border-white/10 backdrop-blur-3xl space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-emerald-600/20 text-emerald-500">
+                      <List size={20} />
                     </div>
+                    <h3 className="text-lg font-black tracking-widest uppercase">Daftar Episode</h3>
                   </div>
-
-                  {/* Episode List */}
-                  <div>
-                    <h3 className="font-bold flex items-center gap-2 mb-4 text-gray-400">
-                      <Play size={16} /> Episode di Season {currentSeason}
-                    </h3>
-                    <div className="grid grid-cols-1 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      {episodes?.map((ep) => (
-                        <Link
-                          key={ep.id}
-                          href={`/watch/${id}?s=${currentServerIndex}&e=${ep.episode_number}&ss=${currentSeason}`}
-                          className={`flex items-center gap-4 p-3 rounded-xl border transition-all group ${
-                            currentEpisode === ep.episode_number
-                              ? "bg-primary/10 border-primary/30"
-                              : "bg-white/2 border-white/5 hover:bg-white/5 hover:border-white/10"
-                          }`}
-                        >
-                          <div
-                            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-sm font-black ${
-                              currentEpisode === ep.episode_number
-                                ? "bg-primary text-white"
-                                : "bg-white/10 text-gray-400"
-                            }`}
-                          >
-                            {ep.episode_number}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div
-                              className={`text-sm font-bold truncate ${currentEpisode === ep.episode_number ? "text-white" : "text-gray-300 group-hover:text-white"}`}
-                            >
-                              {ep.title || `Episode ${ep.episode_number}`}
-                            </div>
-                            <div className="text-[10px] text-gray-500 font-semibold mt-0.5">
-                              {ep.air_date
-                                ? new Date(ep.air_date).toLocaleDateString(
-                                    "id-ID",
-                                    {
-                                      day: "numeric",
-                                      month: "short",
-                                      year: "numeric",
-                                    },
-                                  )
-                                : "Tanggal TBA"}
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
+                  <SeasonSelector 
+                    id={id}
+                    currentSeason={currentSeason}
+                    currentServerIndex={currentServerIndex}
+                    seasons={seasons || []}
+                  />
                 </div>
 
-                {(!episodes || episodes.length === 0) && (
-                  <p className="text-sm text-gray-500 text-center py-8 bg-white/2 rounded-xl border border-dashed border-white/10">
-                    Belum ada data episode untuk season ini.
-                  </p>
-                )}
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                  {episodes?.map((ep) => (
+                    <Link
+                      key={ep.id}
+                      href={`/watch/${id}?s=${currentServerIndex}&e=${ep.episode_number}&ss=${currentSeason}`}
+                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-all group ${
+                        currentEpisode === ep.episode_number
+                          ? "bg-red-600/10 border-red-600/30"
+                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10"
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                        currentEpisode === ep.episode_number ? "bg-red-600 text-white" : "bg-white/10 text-gray-500"
+                      }`}>
+                        {ep.episode_number}
+                      </div>
+                      <div className="min-w-0">
+                        <div className={`text-sm font-black truncate ${currentEpisode === ep.episode_number ? "text-white" : "text-gray-400 group-hover:text-white"}`}>
+                          {ep.title || `Episode ${ep.episode_number}`}
+                        </div>
+                        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">
+                          {ep.air_date ? new Date(ep.air_date).getFullYear() : 'TBA'}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
           </aside>

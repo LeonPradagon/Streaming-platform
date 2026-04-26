@@ -9,6 +9,7 @@ interface BrowseFiltersProps {
   currentType: string;
   currentSort: string;
   currentView: string;
+  currentGenre?: string;
   currentCountry?: string;
   currentYear?: string;
 }
@@ -24,7 +25,12 @@ const TYPES = [
   { value: 'variety', label: 'Variety' },
 ];
 
+const GENRES = [
+  "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Science Fiction", "Thriller", "War"
+];
+
 const SORTS = [
+  { value: 'populer', label: 'Populer' },
   { value: 'terbaru', label: 'Terbaru' },
   { value: 'rating', label: 'Rating Tertinggi' },
   { value: 'az', label: 'A-Z' },
@@ -42,7 +48,7 @@ const COUNTRIES = [
 
 const YEARS = ['all', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015'];
 
-export default function BrowseFilters({ currentQ, currentType, currentSort, currentView, currentCountry, currentYear }: BrowseFiltersProps) {
+export default function BrowseFilters({ currentQ, currentType, currentSort, currentView, currentGenre, currentCountry, currentYear }: BrowseFiltersProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(currentQ);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -53,6 +59,7 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
     const allParams = {
       q: currentQ,
       type: currentType,
+      genre: currentGenre,
       sort: currentSort,
       view: currentView,
       country: currentCountry,
@@ -106,10 +113,10 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
         <button 
           onClick={() => setIsFilterOpen(!isFilterOpen)}
           className={`flex items-center gap-2 border px-6 py-2.5 rounded-full text-sm font-bold transition uppercase tracking-tight ${
-            isFilterOpen ? 'bg-red-600 border-red-600 text-white' : 'bg-black/40 border-white/20 text-white hover:bg-white/10'
+            isFilterOpen ? 'bg-red-600 border-red-600 text-white shadow-[0_0_20px_rgba(229,9,20,0.3)]' : 'bg-black/40 border-white/20 text-white hover:bg-white/10'
           }`}
         >
-          <Filter size={16} /> Filter
+          <Filter size={16} /> {isFilterOpen ? 'Tutup Filter' : 'Filter Lanjut'}
         </button>
         
         {/* View Toggle */}
@@ -131,19 +138,52 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
 
       {/* Expanded Filters */}
       {isFilterOpen && (
-        <div className="bg-[#141414]/80 backdrop-blur-xl p-6 rounded-3xl animate-fadeIn border border-white/10 space-y-6 shadow-2xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-[#141414] p-8 rounded-[2.5rem] animate-fadeIn border border-white/5 space-y-10 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-red-600/5 blur-[100px] -z-10" />
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+            
+            {/* Genre Filter - NEW */}
+            <div className="lg:col-span-3">
+              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.4em] mb-4 block">Eksplorasi Genre</label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => router.push(buildUrl({ genre: '' }))}
+                  className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
+                    !currentGenre 
+                      ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-600/20' 
+                      : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  Semua Genre
+                </button>
+                {GENRES.map(g => (
+                  <button
+                    key={g}
+                    onClick={() => router.push(buildUrl({ genre: g }))}
+                    className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
+                      currentGenre === g 
+                        ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-600/20' 
+                        : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Type Filter */}
             <div>
-              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-3 block">Kategori</label>
+              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.4em] mb-4 block">Kategori</label>
               <div className="flex flex-wrap gap-2">
                 {TYPES.map(t => (
                   <button
                     key={t.value}
                     onClick={() => router.push(buildUrl({ type: t.value }))}
-                    className={`px-4 py-1.5 rounded-lg text-[12px] font-bold border transition ${
+                    className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
                       (currentType || 'all') === t.value 
-                        ? 'bg-red-600 border-red-500 text-white' 
+                        ? 'bg-white text-black border-white shadow-lg' 
                         : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'
                     }`}
                   >
@@ -155,15 +195,15 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
 
             {/* Country Filter */}
             <div>
-              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-3 block">Negara</label>
+              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.4em] mb-4 block">Negara</label>
               <div className="flex flex-wrap gap-2">
                 {COUNTRIES.map(c => (
                   <button
                     key={c.value}
                     onClick={() => router.push(buildUrl({ country: c.value }))}
-                    className={`px-4 py-1.5 rounded-lg text-[12px] font-bold border transition ${
+                    className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
                       (currentCountry || 'all') === c.value 
-                        ? 'bg-red-600 border-red-500 text-white' 
+                        ? 'bg-white text-black border-white shadow-lg' 
                         : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'
                     }`}
                   >
@@ -173,37 +213,17 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
               </div>
             </div>
 
-            {/* Year Filter */}
-            <div>
-              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-3 block">Tahun</label>
-              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
-                {YEARS.map(y => (
-                  <button
-                    key={y}
-                    onClick={() => router.push(buildUrl({ year: y }))}
-                    className={`px-4 py-1.5 rounded-lg text-[12px] font-bold border transition ${
-                      (currentYear || 'all') === y 
-                        ? 'bg-red-600 border-red-500 text-white' 
-                        : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'
-                    }`}
-                  >
-                    {y === 'all' ? 'Semua' : y}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Sort */}
             <div>
-              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-3 block">Urutkan</label>
-              <div className="flex flex-col gap-2">
+              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.4em] mb-4 block">Urutan</label>
+              <div className="flex flex-wrap gap-2">
                 {SORTS.map(s => (
                   <button
                     key={s.value}
                     onClick={() => router.push(buildUrl({ sort: s.value }))}
-                    className={`px-4 py-1.5 rounded-lg text-[12px] font-bold border transition text-left ${
-                      (currentSort || 'terbaru') === s.value 
-                        ? 'bg-red-600 border-red-500 text-white' 
+                    className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
+                      (currentSort || 'populer') === s.value 
+                        ? 'bg-white text-black border-white shadow-lg' 
                         : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'
                     }`}
                   >
@@ -212,17 +232,19 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
                 ))}
               </div>
             </div>
+
           </div>
 
-          <div className="pt-4 border-t border-white/5 flex justify-end">
+          <div className="pt-8 border-t border-white/5 flex justify-between items-center">
+            <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest">Gunakan filter untuk hasil lebih spesifik</p>
             <button
               onClick={() => {
                 setSearchQuery('');
                 router.push('/browse');
               }}
-              className="text-xs text-gray-500 hover:text-red-500 font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
+              className="text-[10px] text-gray-500 hover:text-red-500 font-black uppercase tracking-[0.3em] transition-all flex items-center gap-2 group"
             >
-              <X size={14} /> Reset Semua Filter
+              <X size={14} className="group-hover:rotate-90 transition-transform" /> Reset Pencarian
             </button>
           </div>
         </div>

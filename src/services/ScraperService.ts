@@ -51,24 +51,33 @@ export class ScraperService {
   private async fetchWithTimeout(url: string, options: any = {}, timeout = 15000, retryCount = 0): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
+    
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(id);
       
-      if (response.status === 429) {
+      // Handle Rate Limiting (429) or Server Errors (5xx)
+      if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
         if (retryCount >= 3) {
-          throw new Error(`Rate limit exceeded after ${retryCount} retries`);
+          throw new Error(`External API failed with status ${response.status} after ${retryCount} retries`);
         }
+        
         const retryAfter = response.headers.get('Retry-After');
-        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 8000;
-        console.warn(`[Scraper] Rate limited by ${url}. Pausing for ${waitTime/1000}s (Retry ${retryCount + 1})...`);
+        // Exponential backoff: 2s, 4s, 8s or use Retry-After header
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, retryCount) * 2000;
+        
+        console.warn(`[Scraper] API status ${response.status} at ${url}. Retrying in ${waitTime/1000}s...`);
         await this.delay(waitTime);
         return this.fetchWithTimeout(url, options, timeout, retryCount + 1); 
       }
       
       return response;
-    } catch (error) {
+    } catch (error: any) {
       clearTimeout(id);
+      if (error.name === 'AbortError' && retryCount < 2) {
+        console.warn(`[Scraper] Timeout at ${url}. Retrying...`);
+        return this.fetchWithTimeout(url, options, timeout, retryCount + 1);
+      }
       throw error;
     }
   }
@@ -243,52 +252,49 @@ export class ScraperService {
       if (!data.seasons) return;
 
       for (const seasonItem of data.seasons) {
-        if (seasonItem.season_number === 0) continue;
+        try {
+          if (seasonItem.season_number === 0) continue;
 
-        const { data: dbSeason, error: sError } = await supabase
-          .from('seasons')
-          .upsert({
-            content_id: contentId,
-            season_number: seasonItem.season_number,
-            title: seasonItem.name,
-            overview: seasonItem.overview,
-            poster_path: seasonItem.poster_path,
-            air_date: seasonItem.air_date,
-            episode_count: seasonItem.episode_count
-          }, { onConflict: 'content_id,season_number' })
-          .select().single();
+          const { data: dbSeason, error: sError } = await supabase
+            .from('seasons')
+            .upsert({
+              content_id: contentId,
+              season_number: seasonItem.season_number,
+              title: seasonItem.name,
+              overview: seasonItem.overview,
+              poster_path: seasonItem.poster_path,
+              air_date: seasonItem.air_date,
+              episode_count: seasonItem.episode_count
+            }, { onConflict: 'content_id,season_number' })
+            .select().single();
 
-        if (sError || !dbSeason) continue;
+          if (sError || !dbSeason) continue;
 
-        // Smart Skip: If episode count matches, we might not need to fetch every episode again
-        // But for fresh metadata, we fetch once. 
-        const sRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
-        if (!sRes.ok) continue;
-        const sData = await sRes.json();
+          const sRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
+          if (!sRes.ok) continue;
+          const sData = await sRes.json();
 
-        if (sData.episodes && sData.episodes.length > 0) {
-          // Prepare episodes for bulk upsert
-          const episodesToUpsert = sData.episodes.map((ep: any) => ({
-            season_id: dbSeason.id,
-            episode_number: ep.episode_number,
-            title: ep.name,
-            overview: ep.overview,
-            still_path: ep.still_path,
-            air_date: ep.air_date
-          }));
+          if (sData.episodes && sData.episodes.length > 0) {
+            const episodesToUpsert = sData.episodes.map((ep: any) => ({
+              season_id: dbSeason.id,
+              episode_number: ep.episode_number,
+              title: ep.name,
+              overview: ep.overview,
+              still_path: ep.still_path,
+              air_date: ep.air_date
+            }));
 
-          // Bulk upsert episodes (much faster than one-by-one)
-          await supabase
-            .from('episodes')
-            .upsert(episodesToUpsert, { onConflict: 'season_id,episode_number' });
+            await supabase
+              .from('episodes')
+              .upsert(episodesToUpsert, { onConflict: 'season_id,episode_number' });
 
-          console.log(`[Scraper] Bulk upserted ${episodesToUpsert.length} episodes for ${showTitle} S${seasonItem.season_number}`);
+            console.log(`[Scraper] Bulk upserted ${episodesToUpsert.length} episodes for ${showTitle} S${seasonItem.season_number}`);
+          }
+          
+          await this.delay(200);
+        } catch (seasonErr: any) {
+          console.error(`[Scraper] Error processing season ${seasonItem.season_number} for ${tmdbId}:`, seasonErr.message);
         }
-        
-        // Removed individual subtitle fetching here as it causes serverless timeouts. 
-        // Subtitles should be synced using the dedicated 'sync subtitles' task.
-        
-        await this.delay(200); // Shorter delay
       }
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
@@ -366,13 +372,24 @@ export class ScraperService {
 
           const { data: existing } = await supabase
             .from('contents')
-            .select('id, status')
+            .select('id, status, updated_at')
             .eq('tmdb_id', item.id)
             .single();
 
           if (existing && genre.type === 'movie') return;
 
           try {
+            // Check if item was updated in the last 24h to avoid redundant deep scrapes
+            if (existing && existing.updated_at) {
+              const lastUpdate = new Date(existing.updated_at).getTime();
+              const now = new Date().getTime();
+              if (now - lastUpdate < 24 * 60 * 60 * 1000) {
+                 // Still check for provider links if needed, but maybe skip deep metadata fetch
+                 // For now, let's just skip completely to be fast
+                 return;
+              }
+            }
+
             const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
             if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
             const metadata: any = await resMetadata.json();
@@ -398,7 +415,8 @@ export class ScraperService {
                 popularity: item.popularity || metadata.popularity || 0,
                 release_date: metadata.release_date || metadata.first_air_date,
                 tv_status: metadata.status,
-                is_healthy: true
+                is_healthy: true,
+                updated_at: new Date().toISOString()
               }, { onConflict: 'tmdb_id' })
               .select().single();
 
@@ -411,15 +429,22 @@ export class ScraperService {
               await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, totalEstimated, item.title || item.name);
             }
             
-            await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+            // Subtitles are secondary, don't let them crash the main flow
+            try {
+              await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+            } catch (sErr) {
+              console.warn(`[Scraper] Subtitle fetch failed for ${item.id}:`, sErr);
+            }
             
             summary.items_added++;
 
           } catch (err: any) {
             summary.items_failed++;
-            summary.errors.push(`${item.title || item.id}: ${err.message}`);
+            if (summary.errors.length < 50) { // Limit error log size
+              summary.errors.push(`${item.title || item.id}: ${err.message}`);
+            }
           }
-        }, 3, () => this.checkTaskActive(logId));
+        }, 5, () => this.checkTaskActive(logId));
 
         progress[key] = page + 1;
         await this.updateScraperProgress(progress);
@@ -467,7 +492,7 @@ export class ScraperService {
         try {
           const { data: existing } = await supabase
             .from('contents')
-            .select('id, status')
+            .select('id, status, updated_at')
             .eq('tmdb_id', item.id)
             .single();
 
