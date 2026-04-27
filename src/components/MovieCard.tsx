@@ -8,9 +8,12 @@ import { motion } from "framer-motion";
 
 interface MovieCardProps {
   item: any;
+  progress?: number;
+  isNew?: boolean;
+  rank?: number;
 }
 
-export default function MovieCard({ item }: MovieCardProps) {
+export default function MovieCard({ item, progress, isNew, rank }: MovieCardProps) {
   // Safe metadata extraction
   const metadata = item.metadata || item;
   const id = item.id;
@@ -33,7 +36,16 @@ export default function MovieCard({ item }: MovieCardProps) {
       transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
       className="group relative"
     >
-      <Link href={`/watch/${id}?type=${type}`} className="block">
+      {/* Rank Number (for Trending) */}
+      {rank !== undefined && (
+        <div className="absolute -left-4 md:-left-8 bottom-12 md:bottom-20 z-0 opacity-20 pointer-events-none select-none">
+          <span className="text-8xl md:text-[12rem] font-black italic leading-none text-transparent stroke-white stroke-2" style={{ WebkitTextStroke: "2px rgba(255,255,255,0.3)" }}>
+            {rank}
+          </span>
+        </div>
+      )}
+
+      <Link href={`/watch/${id}?type=${type}`} className="block relative z-10">
         <div className="relative aspect-[2/3] w-full overflow-hidden rounded-[1.5rem] bg-white/5 border border-white/10 shadow-xl transition-all duration-500 group-hover:border-red-600/50 group-hover:shadow-red-600/20">
           {/* Poster Image */}
           <Image
@@ -44,6 +56,17 @@ export default function MovieCard({ item }: MovieCardProps) {
             className="object-cover transition-transform duration-700 group-hover:scale-110 group-hover:rotate-1"
             loading="lazy"
           />
+
+          {/* Progress Bar (at the bottom of image) */}
+          {progress !== undefined && progress > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/40 backdrop-blur-sm z-30 overflow-hidden">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                className="h-full bg-red-600 shadow-[0_0_10px_rgba(229,9,20,0.8)]"
+              />
+            </div>
+          )}
 
           {/* Play Icon Overlay (Modern 2025) */}
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20">
@@ -58,6 +81,11 @@ export default function MovieCard({ item }: MovieCardProps) {
 
           {/* Top Badges */}
           <div className="absolute top-3 left-3 z-30 flex flex-col gap-2">
+            {isNew && (
+              <div className="bg-red-600 text-white text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg shadow-lg">
+                NEW
+              </div>
+            )}
             {isTV && (
               <div className={`backdrop-blur-xl border px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-white shadow-2xl ${
                 isOngoing 
@@ -97,3 +125,4 @@ export default function MovieCard({ item }: MovieCardProps) {
     </motion.div>
   );
 }
+
