@@ -90,7 +90,7 @@ function ProfileContent() {
                </div>
             </div>
             <h2 className="text-2xl font-black text-white">{displayName}</h2>
-            <p className="text-primary font-bold text-sm mt-1">{userId ? "Premium Plan" : "Guest Mode"}</p>
+            <p className="text-primary font-bold text-sm mt-1">{userId ? (displayName === 'Admin' ? 'Super Admin' : 'Premium Member') : "Guest Mode"}</p>
             <p className="text-gray-400 text-xs mt-2">{userId ? "Member since 2024" : "Local Storage"}</p>
           </div>
 

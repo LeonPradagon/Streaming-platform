@@ -135,10 +135,27 @@ export async function GET(req: Request) {
 
     let logId = cronState.logId;
     if (!logId) {
-       // Start of a brand new automated task
-       logId = await scraper.createLog(`Automated ${task.toUpperCase()} (CRON)`);
-       if (!logId) {
-          return NextResponse.json({ error: 'Another task is already running' }, { status: 400 });
+       // Search for an existing 'running' log for this specific automated task
+       // This handles cases where the cronState in 'settings' was lost but the task is still active in 'scraper_logs'
+       const taskName = `Automated ${task.toUpperCase()} (CRON)`;
+       const { data: existingLog } = await supabase
+         .from('scraper_logs')
+         .select('id')
+         .eq('task_name', taskName)
+         .eq('status', 'running')
+         .order('created_at', { ascending: false })
+         .limit(1)
+         .maybeSingle();
+
+       if (existingLog) {
+         console.log(`[Scraper API] Found orphaned running task ${existingLog.id}, resuming...`);
+         logId = existingLog.id;
+       } else {
+         // Start of a brand new automated task
+         logId = await scraper.createLog(taskName);
+         if (!logId) {
+            return NextResponse.json({ error: 'Another task is already running' }, { status: 400 });
+         }
        }
        cronState.logId = logId;
     }

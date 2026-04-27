@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import AdmZip from 'adm-zip';
 
 // Configuration
 
@@ -136,7 +137,6 @@ export class SubtitleService {
     if (!zipRes.ok) throw new Error('Failed to download ZIP from Subdl');
 
     const arrayBuffer = await zipRes.arrayBuffer();
-    const AdmZip = require('adm-zip');
     const zip = new AdmZip(Buffer.from(arrayBuffer));
     
     for (const entry of zip.getEntries()) {
@@ -164,15 +164,20 @@ export class SubtitleService {
       const { data: listData } = await supabase.storage.from('subtitles').list(folderPath, { search: searchPrefix });
       
       if (listData && listData.length > 0) {
-        // If file exists
-        const file = listData.find(f => f.name === `${searchPrefix}_id.vtt` || f.name === `${searchPrefix}_en.vtt` || f.name === `${searchPrefix}.vtt`);
+        // Prioritize Indonesian, then English
+        const idFile = listData.find(f => f.name === `${searchPrefix}_id.vtt`);
+        const enFile = listData.find(f => f.name === `${searchPrefix}_en.vtt`);
+        const defaultFile = listData.find(f => f.name === `${searchPrefix}.vtt`);
+        
+        const file = idFile || enFile || defaultFile;
+        
         if (file) {
           const { data } = supabase.storage.from('subtitles').getPublicUrl(`${folderPath}/${file.name}`);
           return { 
             status: 'skipped', 
             reason: 'already_exists', 
             url: data.publicUrl,
-            language: file.name.includes('_en') ? 'en' : 'id'
+            language: file === idFile ? 'id' : (file === enFile ? 'en' : 'id')
           };
         }
       }

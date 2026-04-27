@@ -70,13 +70,9 @@ export default function MovieCard({ item, progress, isNew, rank }: MovieCardProp
 
           {/* Play Icon Overlay (Modern 2025) */}
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20">
-            <motion.div 
-              initial={{ scale: 0.5, opacity: 0 }}
-              whileHover={{ scale: 1, opacity: 1 }}
-              className="w-14 h-14 rounded-full bg-red-600 flex items-center justify-center shadow-[0_0_30px_rgba(229,9,20,0.6)]"
-            >
+            <div className="w-14 h-14 rounded-full bg-red-600 flex items-center justify-center shadow-[0_0_30px_rgba(229,9,20,0.6)] scale-50 group-hover:scale-100 transition-transform duration-300">
               <Play size={24} fill="white" className="text-white ml-1" />
-            </motion.div>
+            </div>
           </div>
 
           {/* Top Badges */}
@@ -86,13 +82,9 @@ export default function MovieCard({ item, progress, isNew, rank }: MovieCardProp
                 NEW
               </div>
             )}
-            {isTV && (
-              <div className={`backdrop-blur-xl border px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-white shadow-2xl ${
-                isOngoing 
-                  ? 'bg-emerald-600/40 border-emerald-500/30 text-emerald-400' 
-                  : 'bg-indigo-600/40 border-indigo-500/30 text-indigo-400'
-              }`}>
-                {isOngoing ? 'Ongoing' : 'Tamat'}
+            {isTV && isOngoing && (
+              <div className="backdrop-blur-xl border px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-emerald-400 shadow-2xl bg-emerald-600/40 border-emerald-500/30">
+                Ongoing
               </div>
             )}
           </div>

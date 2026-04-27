@@ -40,7 +40,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
   const rating = meta.vote_average ? meta.vote_average.toFixed(1) : "0.0";
 
   return (
-    <div className="relative w-full h-[75vh] md:h-[90vh] overflow-hidden bg-black">
+    <div className="relative w-full h-[85vh] md:h-[90vh] overflow-hidden bg-black">
       <AnimatePresence initial={false} custom={direction} mode="wait">
         <motion.div
           key={currentIndex}
@@ -72,24 +72,24 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
 
           {/* Content */}
           <div className="absolute inset-0 flex items-center px-6 md:px-16 lg:px-24 z-20">
-            <div className="max-w-4xl">
+            <div className="max-w-4xl pt-20 md:pt-0">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
-                className="flex items-center gap-4 mb-6"
+                className="flex items-center gap-3 md:gap-4 mb-4 md:mb-6"
               >
-                <div className="flex items-center gap-1.5 text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded-full border border-yellow-500/20 font-black text-sm">
+                <div className="flex items-center gap-1.5 text-yellow-500 bg-yellow-500/10 px-2 md:px-3 py-1 rounded-full border border-yellow-500/20 font-black text-xs md:text-sm">
                   <Star size={14} fill="currentColor" />
                   {rating}
                 </div>
                 {year && (
-                  <div className="flex items-center gap-1.5 text-gray-400 font-bold text-sm">
+                  <div className="flex items-center gap-1.5 text-gray-400 font-bold text-xs md:text-sm">
                     <Calendar size={14} />
                     {year}
                   </div>
                 )}
-                <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded shadow-lg">
+                <div className="bg-red-600 text-white text-[8px] md:text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded shadow-lg">
                   TRENDING NOW
                 </div>
               </motion.div>
@@ -98,7 +98,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.7, delay: 0.3, type: "spring" }}
-                className="text-5xl md:text-7xl lg:text-8xl font-black text-white tracking-tighter leading-[0.85] mb-6 uppercase"
+                className="text-4xl md:text-7xl lg:text-8xl font-black text-white tracking-tighter leading-[0.9] mb-4 md:mb-6 uppercase"
               >
                 {meta.title}
               </motion.h1>
@@ -107,7 +107,7 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.7, delay: 0.4 }}
-                className="text-gray-300 text-sm md:text-lg max-w-2xl line-clamp-3 font-medium opacity-80 mb-10 leading-relaxed"
+                className="text-gray-300 text-xs md:text-lg max-w-2xl line-clamp-3 md:line-clamp-4 font-medium opacity-80 mb-6 md:mb-10 leading-relaxed"
               >
                 {meta.overview}
               </motion.p>
@@ -116,41 +116,48 @@ export default function HeroCarousel({ items }: HeroCarouselProps) {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.7, delay: 0.5 }}
-                className="flex items-center gap-4"
+                className="flex flex-wrap items-center gap-3 md:gap-4 mb-8"
               >
                 <Link
                   href={`/watch/${currentItem.id}?type=${currentItem.type !== 'movie' ? 'tv' : 'movie'}`}
-                  className="bg-white text-black px-10 py-4 rounded-2xl flex items-center gap-3 font-black transition-all hover:bg-red-600 hover:text-white active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] group"
+                  className="bg-white text-black px-6 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl flex items-center gap-2 md:gap-3 font-black text-sm md:text-base transition-all hover:bg-red-600 hover:text-white active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] group"
                 >
-                  <Play fill="currentColor" size={20} className="group-hover:scale-110 transition-transform" />
+                  <Play fill="currentColor" size={18} className="md:w-5 md:h-5 group-hover:scale-110 transition-transform" />
                   WATCH NOW
                 </Link>
                 <Link
                   href={`/watch/${currentItem.id}?type=${currentItem.type !== 'movie' ? 'tv' : 'movie'}`}
-                  className="bg-white/5 backdrop-blur-xl border border-white/10 text-white px-10 py-4 rounded-2xl flex items-center gap-3 font-black transition-all hover:bg-white/10 active:scale-95"
+                  className="bg-white/5 backdrop-blur-xl border border-white/10 text-white px-6 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl flex items-center gap-2 md:gap-3 font-black text-sm md:text-base transition-all hover:bg-white/10 active:scale-95"
                 >
-                  <Info size={20} />
+                  <Info size={18} className="md:w-5 md:h-5" />
                   DETAILS
                 </Link>
+              </motion.div>
+
+              {/* Modern Pagination Dots (Now inside content flow) */}
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="flex items-center gap-2"
+              >
+                {items.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => {
+                      setDirection(index > currentIndex ? 1 : -1);
+                      setCurrentIndex(index);
+                    }}
+                    className={`h-1 rounded-full transition-all duration-700 ${
+                      index === currentIndex ? "w-10 md:w-12 bg-red-600 shadow-[0_0_15px_rgba(229,9,20,0.5)]" : "w-3 md:w-4 bg-white/20 hover:bg-white/40"
+                    }`}
+                  />
+                ))}
               </motion.div>
             </div>
           </div>
         </motion.div>
       </AnimatePresence>
-
-      {/* Modern Pagination Dots */}
-      <div className="absolute bottom-36 left-6 md:left-16 lg:left-24 flex items-center gap-2 z-30">
-        {items.map((_, index) => (
-          <button
-            key={index}
-            onClick={() => setCurrentIndex(index)}
-            className={`h-1.5 rounded-full transition-all duration-700 ${
-              index === currentIndex ? "w-12 bg-red-600 shadow-[0_0_15px_rgba(229,9,20,0.5)]" : "w-4 bg-white/20 hover:bg-white/40"
-            }`}
-          />
-        ))}
-      </div>
-
     </div>
   );
 }

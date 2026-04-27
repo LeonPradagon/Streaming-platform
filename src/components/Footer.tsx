@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Mail, Globe, Share2, MessageSquare, Heart } from "lucide-react";
 import { motion } from "framer-motion";
+import { showToast } from "@/components/Toast";
 
 export default function Footer({ siteTitle }: { siteTitle: string }) {
   const titleParts = siteTitle.split(" ");
@@ -30,10 +31,10 @@ export default function Footer({ siteTitle }: { siteTitle: string }) {
               Nikmati pengalaman menonton tanpa batas, kapan saja, di mana saja.
             </p>
             <div className="flex items-center gap-4">
-              <SocialLink icon={<Globe size={20} />} href="#" />
-              <SocialLink icon={<Share2 size={20} />} href="#" />
-              <SocialLink icon={<MessageSquare size={20} />} href="#" />
-              <SocialLink icon={<Mail size={20} />} href="#" />
+              <SocialLink icon={<Globe size={20} />} href="#" label="Website" />
+              <SocialLink icon={<Share2 size={20} />} href="#" label="Share" />
+              <SocialLink icon={<MessageSquare size={20} />} href="#" label="Chat" />
+              <SocialLink icon={<Mail size={20} />} href="#" label="Email" />
             </div>
           </div>
 
@@ -68,7 +69,10 @@ export default function Footer({ siteTitle }: { siteTitle: string }) {
                   placeholder="Email Anda"
                   className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm text-white focus:outline-none focus:border-red-600/50 transition-all group-hover:bg-white/10"
                 />
-                <button className="absolute right-2 top-2 bottom-2 bg-red-600 hover:bg-red-700 text-white px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95">
+                <button 
+                  onClick={() => showToast('Fitur berlangganan segera hadir!', 'info')}
+                  className="absolute right-2 top-2 bottom-2 bg-red-600 hover:bg-red-700 text-white px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95"
+                >
                   Gabung
                 </button>
              </div>
@@ -90,10 +94,11 @@ export default function Footer({ siteTitle }: { siteTitle: string }) {
   );
 }
 
-function SocialLink({ icon, href }: { icon: any, href: string }) {
+function SocialLink({ icon, href, label }: { icon: any, href: string, label?: string }) {
   return (
     <Link 
-      href={href} 
+      href={href}
+      aria-label={label || 'Social link'}
       className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:bg-red-600 hover:text-white hover:border-red-600 transition-all duration-300"
     >
       {icon}

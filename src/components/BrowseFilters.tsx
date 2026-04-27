@@ -46,7 +46,7 @@ const COUNTRIES = [
   { value: 'id', label: 'Indonesia' },
 ];
 
-const YEARS = ['all', '2024', '2023', '2022', '2021', '2020', '2019', '2018', '2017', '2016', '2015'];
+const YEARS = ['all', ...Array.from({ length: 12 }, (_, i) => String(new Date().getFullYear() - i))];
 
 export default function BrowseFilters({ currentQ, currentType, currentSort, currentView, currentGenre, currentCountry, currentYear }: BrowseFiltersProps) {
   const router = useRouter();

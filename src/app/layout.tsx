@@ -51,14 +51,10 @@ export default async function RootLayout({
 
   // Detect if current route is admin or auth page
   const headersList = await headers();
-  const pathname = 
-    headersList.get("x-pathname") || 
-    headersList.get("x-invoke-path") || 
-    headersList.get("x-url") || 
-    "";
+  const pathname = headersList.get("x-pathname") || "";
   
   const isAdminRoute = pathname.startsWith("/admin");
-  const isAuthRoute = pathname === "/login" || pathname === "/register";
+  const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/register");
 
   const [settingsResult, authResult] = await Promise.all([
     supabase.from("settings").select("*"),

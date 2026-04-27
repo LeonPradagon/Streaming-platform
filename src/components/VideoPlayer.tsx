@@ -175,13 +175,19 @@ export default function VideoPlayer({
           urlObj.searchParams.set('sub', externalSubtitle);
           urlObj.searchParams.set('sub_url', externalSubtitle);
           urlObj.searchParams.set('subtitle_url', externalSubtitle);
+          urlObj.searchParams.set('subtitle', externalSubtitle); // fallback
         }
       }
 
       // VidLink specific: Auto Subtitle & Styling
       if (url.includes('vidlink')) {
         urlObj.searchParams.set('autoplay', '1');
-        urlObj.searchParams.set('sub_lang', 'Indonesian');
+        if (externalSubtitle) {
+          urlObj.searchParams.set('subtitle', externalSubtitle);
+          urlObj.searchParams.set('sub', externalSubtitle); // fallback
+        } else {
+          urlObj.searchParams.set('sub_lang', 'Indonesian');
+        }
         urlObj.searchParams.set('primaryColor', 'E50914');
         urlObj.searchParams.set('secondaryColor', 'ffffff');
         urlObj.searchParams.set('iconColor', 'ffffff');
@@ -191,6 +197,7 @@ export default function VideoPlayer({
       if (url.includes('moviesapi.to')) {
         if (externalSubtitle) {
           urlObj.searchParams.set('sub', externalSubtitle);
+          urlObj.searchParams.set('subtitle', externalSubtitle); // fallback
         }
       }
 

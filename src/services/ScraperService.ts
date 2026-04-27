@@ -96,11 +96,12 @@ export class ScraperService {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
     // 1. Get stale tasks from DB
+    // Use updated_at instead of created_at for better accuracy with chunked tasks
     const { data: staleTasks } = await supabase
       .from('scraper_logs')
       .select('task_name')
       .eq('status', 'running')
-      .lt('created_at', tenMinutesAgo);
+      .lt('updated_at', tenMinutesAgo);
 
     if (staleTasks && staleTasks.length > 0) {
       console.log(`[Scraper] Cleaning up ${staleTasks.length} stale tasks...`);
@@ -112,7 +113,7 @@ export class ScraperService {
           error_message: 'Task timed out (stale task auto-cleanup 10m)' 
         })
         .eq('status', 'running')
-        .lt('created_at', tenMinutesAgo);
+        .lt('updated_at', tenMinutesAgo);
     }
   }
 
@@ -158,6 +159,7 @@ export class ScraperService {
           summary,
           error_message: errorMessage,
           finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(), // Ensure updated_at is touched
           items_count: summary.items_processed || 0,
           progress: { current: summary.items_processed || 0, total: summary.items_processed || 0, current_item: 'Selesai' }
         })
@@ -172,7 +174,8 @@ export class ScraperService {
       await supabase
         .from('scraper_logs')
         .update({
-          progress: { current, total, current_item: currentItem }
+          progress: { current, total, current_item: currentItem },
+          updated_at: new Date().toISOString() // Touch updated_at to prevent stale cleanup
         })
         .eq('id', logId);
     } catch (err) {
@@ -251,10 +254,12 @@ export class ScraperService {
 
       if (!data.seasons) return;
 
-      for (const seasonItem of data.seasons) {
-        try {
-          if (seasonItem.season_number === 0) continue;
+      // Filter out Specials (Season 0)
+      const validSeasons = data.seasons.filter((s: any) => s.season_number > 0);
 
+      // Process seasons in parallel (max 3 at a time) to stay within timeouts
+      await this.pMap(validSeasons, async (seasonItem: any) => {
+        try {
           const { data: dbSeason, error: sError } = await supabase
             .from('seasons')
             .upsert({
@@ -268,10 +273,10 @@ export class ScraperService {
             }, { onConflict: 'content_id,season_number' })
             .select().single();
 
-          if (sError || !dbSeason) continue;
+          if (sError || !dbSeason) return;
 
           const sRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
-          if (!sRes.ok) continue;
+          if (!sRes.ok) return;
           const sData = await sRes.json();
 
           if (sData.episodes && sData.episodes.length > 0) {
@@ -288,14 +293,12 @@ export class ScraperService {
               .from('episodes')
               .upsert(episodesToUpsert, { onConflict: 'season_id,episode_number' });
 
-            console.log(`[Scraper] Bulk upserted ${episodesToUpsert.length} episodes for ${showTitle} S${seasonItem.season_number}`);
+            console.log(`[Scraper] Updated ${episodesToUpsert.length} episodes for ${showTitle || tmdbId} S${seasonItem.season_number}`);
           }
-          
-          await this.delay(200);
         } catch (seasonErr: any) {
-          console.error(`[Scraper] Error processing season ${seasonItem.season_number} for ${tmdbId}:`, seasonErr.message);
+          console.error(`[Scraper] Error processing season ${seasonItem.season_number}:`, seasonErr.message);
         }
-      }
+      }, 3);
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
     }
@@ -533,7 +536,11 @@ export class ScraperService {
             await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, data.results.length, item.title || item.name);
           }
           
-          await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
+          try {
+              await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
+            } catch (sErr) {
+              console.warn(`[Scraper] Subtitle fetch failed for trending ${item.id}:`, sErr);
+            }
           
           summary.items_added++;
         } catch (err: any) {

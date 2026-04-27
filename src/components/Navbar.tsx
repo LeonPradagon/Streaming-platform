@@ -3,12 +3,12 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
-  Search, User, Menu, X, Play, Bell, Flame, Compass, 
+  Search, User, Menu, X, Play, Flame, Compass, 
   Library, ChevronDown, Globe, Film, Star, LogOut, Settings 
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 const GENRES = [
   { label: "Aksi", value: "Action" },
@@ -47,6 +47,7 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const { scrollY } = useScroll();
+  const supabase = createClient();
 
   // Split title for dual-tone (Logo)
   const titleParts = brandName.split(" ");
@@ -172,9 +173,7 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
               <Search size={20} strokeWidth={2.5} />
             </Link>
             
-            <button className="hidden sm:flex p-2.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-all">
-              <Bell size={20} strokeWidth={2.5} />
-            </button>
+
 
             {user ? (
               <div className="relative" onMouseEnter={() => setActiveDropdown('profile')} onMouseLeave={() => setActiveDropdown(null)}>
@@ -196,7 +195,7 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
                       <Link href="/profile" className="flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-gray-400 hover:bg-white/10 hover:text-white rounded-xl transition-all">
                         <User size={16} /> My Profile
                       </Link>
-                      <Link href="/settings" className="flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-gray-400 hover:bg-white/10 hover:text-white rounded-xl transition-all">
+                      <Link href="/profile?tab=settings" className="flex items-center gap-3 px-4 py-3 text-[13px] font-bold text-gray-400 hover:bg-white/10 hover:text-white rounded-xl transition-all">
                         <Settings size={16} /> Settings
                       </Link>
                       <div className="h-px bg-white/5 my-1" />

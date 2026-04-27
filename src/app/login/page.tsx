@@ -26,7 +26,7 @@ export default function LoginPage() {
         justifyContent: "center",
         backgroundColor: "#060d17",
         backgroundImage:
-          "radial-gradient(circle at top right, rgba(234, 179, 8, 0.05), transparent 40%), radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.05), transparent 40%)",
+          "radial-gradient(circle at top right, rgba(229, 9, 20, 0.05), transparent 40%), radial-gradient(circle at bottom left, rgba(79, 70, 229, 0.05), transparent 40%)",
         padding: "2rem",
       }}
     >
@@ -45,13 +45,13 @@ export default function LoginPage() {
             style={{
               width: "64px",
               height: "64px",
-              backgroundColor: "rgba(234, 179, 8, 0.1)",
+              backgroundColor: "rgba(229, 9, 20, 0.1)",
               borderRadius: "1rem",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               margin: "0 auto 1.5rem",
-              color: "#eab308",
+              color: "#E50914",
             }}
           >
             <Lock size={32} />
@@ -192,7 +192,7 @@ export default function LoginPage() {
           }}
         >
           Belum punya akun?{" "}
-          <Link href="/register" style={{ color: "#eab308", fontWeight: 700 }}>
+          <Link href="/register" style={{ color: "#E50914", fontWeight: 700 }}>
             Daftar di sini
           </Link>
         </div>
@@ -213,8 +213,8 @@ function SubmitButton() {
         width: "100%",
         padding: "1rem",
         borderRadius: "0.75rem",
-        backgroundColor: "#eab308",
-        color: "#060d17",
+        backgroundColor: "#E50914",
+        color: "#ffffff",
         border: "none",
         fontWeight: 800,
         fontSize: "1rem",
@@ -224,7 +224,7 @@ function SubmitButton() {
         justifyContent: "center",
         gap: "0.5rem",
         transition: "all 0.2s ease",
-        boxShadow: "0 10px 20px -5px rgba(234, 179, 8, 0.3)",
+        boxShadow: "0 10px 20px -5px rgba(229, 9, 20, 0.3)",
       }}
     >
       {pending ? (

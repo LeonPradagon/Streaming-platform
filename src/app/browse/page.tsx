@@ -40,9 +40,10 @@ export default async function BrowsePage({
     query = query.contains('genre_names', [capitalizedGenre]);
   }
 
-  // Improved Smart Search
+  // Improved Smart Search (with sanitization)
   if (q) {
-    const flexQ = q.trim().replace(/\s+/g, '%');
+    const sanitizedQ = q.trim().replace(/[%_\\]/g, '\\$&');
+    const flexQ = sanitizedQ.replace(/\s+/g, '%');
     query = query.or(`title.ilike.%${flexQ}%,overview.ilike.%${flexQ}%`);
   }
   

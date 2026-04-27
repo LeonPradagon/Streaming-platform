@@ -90,13 +90,29 @@ export default async function WatchPage({ params, searchParams }: Props) {
   // For TMDB API calls, we need only 'movie' or 'tv'
   const tmdbType = isMovie ? "movie" : "tv";
 
-  // ⚡ PERFORMANCE: Run ALL data fetches in parallel
-  const [linksResult, metadataResult, seasonsResult] = await Promise.all([
+  // ⚡ PERFORMANCE: Run ALL data fetches in parallel (including subtitles)
+  const subtitlePromise = (async () => {
+    try {
+      const { SubtitleService } = await import("@/services/SubtitleService");
+      return await SubtitleService.fetchAndUploadSubtitle(
+        content.tmdb_id, 
+        isMovie ? 'movie' : 'tv',
+        !isMovie ? String(currentSeason) : undefined,
+        !isMovie ? String(currentEpisode) : undefined
+      );
+    } catch (err) {
+      console.error("[WatchPage] Subtitle Fetch Error:", err);
+      return { status: 'error' as const, url: undefined };
+    }
+  })();
+
+  const [linksResult, metadataResult, seasonsResult, subtitleResult] = await Promise.all([
     supabase.from("embed_links").select("*").eq("content_id", id).order("provider", { ascending: true }),
     fetchTMDBMetadata(content.tmdb_id, tmdbType),
     !isMovie 
       ? supabase.from("seasons").select("*").eq("content_id", id).order("season_number", { ascending: true })
       : Promise.resolve({ data: null }),
+    subtitlePromise,
   ]);
 
   // Define priority order for providers
@@ -134,13 +150,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
 
       if (isMovie) {
         // --- MOVIE URL construction ---
-        if (host.includes('multiembed.mov')) {
-          urlObj.searchParams.set('video_id', String(tmdbId));
-          urlObj.searchParams.set('tmdb', '1');
-          urlObj.searchParams.delete('s');
-          urlObj.searchParams.delete('e');
-          finalUrl = urlObj.toString();
-        } else if (host.includes('player.videasy.net')) {
+        if (host.includes('player.videasy.net')) {
           finalUrl = `https://player.videasy.net/movie/${tmdbId}`;
         } else if (host.includes('vidlink.pro')) {
           finalUrl = `https://vidlink.pro/movie/${tmdbId}`;
@@ -150,13 +160,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
         // other providers stored correctly already
       } else {
         // --- TV URL construction ---
-        if (host.includes('multiembed.mov')) {
-          urlObj.searchParams.set('video_id', String(tmdbId));
-          urlObj.searchParams.set('tmdb', '1');
-          urlObj.searchParams.set('s', String(currentSeason));
-          urlObj.searchParams.set('e', String(currentEpisode));
-          finalUrl = urlObj.toString();
-        } else if (host.includes('player.videasy.net')) {
+        if (host.includes('player.videasy.net')) {
           finalUrl = `https://player.videasy.net/tv/${tmdbId}/${currentSeason}/${currentEpisode}`;
         } else if (host.includes('vidlink.pro')) {
           finalUrl = `https://vidlink.pro/tv/${tmdbId}/${currentSeason}/${currentEpisode}`;
@@ -186,7 +190,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
     seasons?.find((s) => s.season_number === currentSeason) || seasons?.[0];
 
   // Fetch episodes (depends on activeSeason, so must be after)
-  const { data: episodes } = activeSeason
+  let { data: episodes } = activeSeason
     ? await supabase
         .from("episodes")
         .select("*")
@@ -194,22 +198,19 @@ export default async function WatchPage({ params, searchParams }: Props) {
         .order("episode_number", { ascending: true })
     : { data: [] };
 
-  // 🎬 NEW: Fetch Subtitles (Scraped or Cached)
-  let externalSubtitle = "";
-  try {
-    const { SubtitleService } = await import("@/services/SubtitleService");
-    const subResult = await SubtitleService.fetchAndUploadSubtitle(
-      content.tmdb_id, 
-      isMovie ? 'movie' : 'tv',
-      !isMovie ? String(currentSeason) : undefined,
-      !isMovie ? String(currentEpisode) : undefined
-    );
-    if (subResult.url) {
-      externalSubtitle = subResult.url;
-    }
-  } catch (err) {
-    console.error("[WatchPage] Subtitle Fetch Error:", err);
-  }
+  // Filter to only aired episodes
+  const now = new Date();
+  episodes = episodes?.filter(ep => {
+    if (!ep.air_date) return true;
+    return new Date(ep.air_date) <= now;
+  }) || [];
+
+  const ongoingStatuses = ["returning series", "ongoing", "in production"];
+  const tvStatus = metadata?.status || content.tv_status;
+  const isOngoing = tvStatus && ongoingStatuses.includes(tvStatus.toLowerCase());
+
+  // 🎬 Subtitles (already fetched in parallel above)
+  const externalSubtitle = subtitleResult?.url || "";
 
   const nextEpisode = !isMovie && episodes?.find(ep => ep.episode_number === currentEpisode + 1);
   const nextEpisodeUrl = nextEpisode 
@@ -253,10 +254,17 @@ export default async function WatchPage({ params, searchParams }: Props) {
             <h1 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter leading-tight uppercase">
               {content.title}
             </h1>
-            {!isMovie && episodes && episodes.length > 0 && (
+            {!isMovie && (
               <div className="flex items-center gap-2 text-red-500 font-black tracking-widest text-xs uppercase">
-                <span className="bg-red-600/10 px-2 py-1 rounded border border-red-500/20">Season {currentSeason}</span>
-                <span className="bg-white/10 text-white px-2 py-1 rounded border border-white/10">Episode {currentEpisode}</span>
+                {isOngoing && (
+                  <span className="bg-emerald-600/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20">Ongoing</span>
+                )}
+                {episodes && episodes.length > 0 && (
+                  <>
+                    <span className="bg-red-600/10 px-2 py-1 rounded border border-red-500/20">Season {currentSeason}</span>
+                    <span className="bg-white/10 text-white px-2 py-1 rounded border border-white/10">Episode {currentEpisode}</span>
+                  </>
+                )}
               </div>
             )}
           </div>
