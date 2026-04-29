@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Increase max duration for Vercel (ignored by standard Netlify but kept for compatibility)
-export const maxDuration = 300;
+// Set max duration for Vercel (Hobby tier is limited to 60s max)
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {

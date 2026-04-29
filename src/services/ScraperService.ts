@@ -788,7 +788,7 @@ export class ScraperService {
     const data = await res.json();
 
     if (data.results && data.results.length > 0) {
-      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + 2); // Process 2 items at a time
+      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + 1); // Process 1 item at a time
       
       await this.pMap(resultsToProcess, async (item: any) => {
         summary.items_processed++;
@@ -838,7 +838,7 @@ export class ScraperService {
     // Determine next state
     let nextGenreIndex = currentGenreIndex;
     let nextPage = currentPage;
-    let nextItemIndex = currentItemIndex + 2;
+    let nextItemIndex = currentItemIndex + 1;
 
     if (nextItemIndex >= (data.results?.length || 0)) {
       nextItemIndex = 0;
