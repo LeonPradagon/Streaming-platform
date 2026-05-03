@@ -34,8 +34,9 @@ export async function POST(req: Request) {
       stopped: data?.length || 0
     });
 
-  } catch (err: any) {
-    console.error('[API] Stop Scraper Fatal:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[API] Stop Scraper Fatal:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

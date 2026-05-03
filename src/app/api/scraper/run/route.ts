@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  let activeLogId: string | undefined;
+  
   try {
     const supabase = await createClient();
     
@@ -36,8 +38,21 @@ export async function POST(req: Request) {
        if (!logId) {
           return NextResponse.json({ error: 'Task already running' }, { status: 400 });
        }
+    } else {
+       // Continuation chunk: touch progress._lastUpdated immediately to prevent stale cleanup
+       await scraper.updateLogProgress(logId, 
+         (state.accumulatedProcessed as number) || 0, 
+         100, 
+         'Melanjutkan pemrosesan...'
+       );
     }
+    
+    activeLogId = logId;
+    
+    // Inject logId into state for real-time progress updates inside chunks
+    state.logId = logId;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let result: any;
 
     if (task === 'scrape') {
@@ -87,8 +102,18 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, ...result, logId });
 
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[Scraper API] POST Error:', message);
+    try {
+       if (activeLogId) {
+           const scraper = ScraperService.getInstance();
+           await scraper.updateLog(activeLogId, 'failed', { items_processed: 0, items_added: 0, items_failed: 0, errors: [message] }, message);
+       }
+    } catch {
+       // Ignore fallback failure
+    }
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -131,7 +156,7 @@ export async function GET(req: Request) {
     // 1. Fetch persistent cron state (unique per task to avoid collision)
     const stateKey = `cron_state_${task}`;
     const { data: cronStateData } = await supabase.from('settings').select('value').eq('key', stateKey).single();
-    let cronState = cronStateData?.value || {};
+    const cronState = cronStateData?.value || {};
 
     let logId = cronState.logId;
     if (!logId) {
@@ -162,6 +187,7 @@ export async function GET(req: Request) {
 
     // 2. Execute ONE chunk based on task type
     console.log(`[Scraper API] Executing CRON ${task} chunk`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let result: any;
     if (task === 'scrape') {
       result = await scraper.runDiscoveryChunk(intensity, cronState);
@@ -218,8 +244,9 @@ export async function GET(req: Request) {
         items_processed_this_chunk: result.summary?.items_processed || 0
     });
 
-  } catch (err: any) {
-    console.error('[Scraper API] GET Handler Exception:', err);
-    return NextResponse.json({ error: 'Internal Server Error', message: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[Scraper API] GET Handler Exception:', message);
+    return NextResponse.json({ error: 'Internal Server Error', message }, { status: 500 });
   }
 }

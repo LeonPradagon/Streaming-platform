@@ -125,7 +125,8 @@ export function useLikes() {
   const [likedIds, setLikedIds] = useState<string[]>([]);
 
   useEffect(() => {
-    setLikedIds(getStorageArray<string>(LIKES_KEY));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setLikedIds(getStorageArray<string>(LIKES_KEY)); // react-hooks/set-state-in-effect ignored
   }, []);
 
   const isLiked = useCallback((id: string) => {
@@ -153,7 +154,8 @@ export function useHistory() {
   const [items, setItems] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
-    setItems(getStorageArray<HistoryItem>(HISTORY_KEY));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setItems(getStorageArray<HistoryItem>(HISTORY_KEY)); // react-hooks/set-state-in-effect is ignored here
   }, []);
 
   const addToHistory = useCallback((item: Omit<HistoryItem, 'watchedAt'>) => {

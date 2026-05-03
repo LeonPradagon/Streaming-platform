@@ -90,31 +90,48 @@ export class ScraperService {
   }
 
   /**
-   * Cleanup tasks that have been 'running' for more than 10 minutes
+   * Cleanup tasks that have been 'running' for more than 2 minutes (aggressive for Vercel recovery)
    */
   private async cleanupStaleTasks() {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
     
-    // 1. Get stale tasks from DB
-    // Use updated_at instead of created_at for better accuracy with chunked tasks
+    // Clean up tasks that are still 'running' but haven't been updated recently
     const { data: staleTasks } = await supabase
       .from('scraper_logs')
-      .select('task_name')
-      .eq('status', 'running')
-      .lt('updated_at', tenMinutesAgo);
+      .select('id, task_name, progress, created_at')
+      .eq('status', 'running');
 
     if (staleTasks && staleTasks.length > 0) {
-      console.log(`[Scraper] Cleaning up ${staleTasks.length} stale tasks...`);
+      const toClean = staleTasks.filter(t => {
+        // Use _lastUpdated from progress JSON, fallback to created_at
+        const lastTouch = (t.progress as any)?._lastUpdated || t.created_at;
+        const lastTouchMs = lastTouch ? new Date(lastTouch).getTime() : 0;
+        return lastTouchMs < twoMinutesAgo;
+      });
 
-      await supabase
-        .from('scraper_logs')
-        .update({ 
-          status: 'failed', 
-          error_message: 'Task timed out (stale task auto-cleanup 10m)' 
-        })
-        .eq('status', 'running')
-        .lt('updated_at', tenMinutesAgo);
+      if (toClean.length > 0) {
+        console.log(`[Scraper] Cleaning up ${toClean.length} stale tasks:`, toClean.map(t => t.task_name));
+        
+        const ids = toClean.map(t => t.id);
+        await supabase
+          .from('scraper_logs')
+          .update({ 
+            status: 'failed', 
+            error_message: 'Task timed out (stale task auto-cleanup 2m)',
+            finished_at: new Date().toISOString()
+          })
+          .in('id', ids);
+      }
     }
+  }
+
+  /**
+   * Chunk timeout guard — returns true if we should stop processing to stay within Vercel's 60s limit
+   */
+  private chunkStartTime = 0;
+  private isChunkTimedOut(safetyMs = 45000): boolean {
+    if (!this.chunkStartTime) return false;
+    return (Date.now() - this.chunkStartTime) >= safetyMs;
   }
 
   /**
@@ -124,24 +141,40 @@ export class ScraperService {
     // 1. Always cleanup stale tasks first to avoid getting stuck
     await this.cleanupStaleTasks();
 
-    // 2. Check DB for any 'running' task with same name that isn't stale (within 60m)
+    // 2. Check DB for any 'running' task with the SAME name
     const { data: existingRunning } = await supabase
       .from('scraper_logs')
-      .select('id')
+      .select('id, created_at')
       .eq('task_name', taskName)
       .eq('status', 'running')
       .single();
 
     if (existingRunning) {
-      console.warn(`[Scraper] Task ${taskName} is already marked as running in DB. Skipping.`);
-      return null;
+      // If the existing running task is older than 3 minutes, force-kill it and proceed
+      const age = Date.now() - new Date(existingRunning.created_at).getTime();
+      if (age > 3 * 60 * 1000) {
+        console.warn(`[Scraper] Force-killing stale task ${existingRunning.id} (age: ${Math.round(age/1000)}s)`);
+        await supabase
+          .from('scraper_logs')
+          .update({ 
+            status: 'failed', 
+            error_message: 'Force-killed: task was stale',
+            finished_at: new Date().toISOString()
+          })
+          .eq('id', existingRunning.id);
+      } else {
+        console.warn(`[Scraper] Task ${taskName} is already marked as running in DB (age: ${Math.round(age/1000)}s). Skipping.`);
+        return null;
+      }
     }
 
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('scraper_logs')
       .insert({
         task_name: taskName,
-        status: 'running'
+        status: 'running',
+        progress: { current: 0, total: 100, current_item: 'Memulai scraper...', _lastUpdated: now }
       })
       .select()
       .single();
@@ -159,9 +192,8 @@ export class ScraperService {
           summary,
           error_message: errorMessage,
           finished_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(), // Ensure updated_at is touched
           items_count: summary.items_processed || 0,
-          progress: { current: summary.items_processed || 0, total: summary.items_processed || 0, current_item: 'Selesai' }
+          progress: { current: summary.items_processed || 0, total: summary.items_processed || 0, current_item: 'Selesai', _lastUpdated: new Date().toISOString() }
         })
         .eq('id', logId);
     } catch (err) {
@@ -174,8 +206,7 @@ export class ScraperService {
       await supabase
         .from('scraper_logs')
         .update({
-          progress: { current, total, current_item: currentItem },
-          updated_at: new Date().toISOString() // Touch updated_at to prevent stale cleanup
+          progress: { current, total, current_item: currentItem, _lastUpdated: new Date().toISOString() }
         })
         .eq('id', logId);
     } catch (err) {
@@ -749,15 +780,16 @@ export class ScraperService {
   }
 
   // ==========================================
-  // CHUNKED EXECUTION FOR SERVERLESS (NETLIFY)
+  // CHUNKED EXECUTION FOR SERVERLESS (VERCEL)
   // ==========================================
 
-  public async runDiscoveryChunk(pagesPerGenre: number = 3, state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+  public async runDiscoveryChunk(pagesPerGenre: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     const scraperConfig = await this.getScraperConfig();
     
     // Fetch genres if not in state
-    let allTasks = state.genres;
+    let allTasks = state.genres as Array<{ id: number; name: string; type: string }> | undefined;
     if (!allTasks) {
       const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
       const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
@@ -767,14 +799,14 @@ export class ScraperService {
       if (!movieGenres || !tvGenres) throw new Error("Failed to fetch genres from TMDB");
       
       allTasks = [
-        ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
-        ...tvGenres.map((g: any) => ({ ...g, type: 'tv' }))
+        ...movieGenres.map((g: { id: number; name: string }) => ({ ...g, type: 'movie' })),
+        ...tvGenres.map((g: { id: number; name: string }) => ({ ...g, type: 'tv' }))
       ];
     }
 
-    const currentGenreIndex = state.currentGenreIndex || 0;
-    const currentPage = state.currentPage || 1;
-    const currentItemIndex = state.currentItemIndex || 0;
+    let currentGenreIndex = (state.currentGenreIndex as number) || 0;
+    let currentPage = (state.currentPage as number) || 1;
+    let currentItemIndex = (state.currentItemIndex as number) || 0;
 
     if (currentGenreIndex >= allTasks.length) {
       return { summary, hasMore: false, total: 0, nextState: {} };
@@ -788,19 +820,32 @@ export class ScraperService {
     const data = await res.json();
 
     if (data.results && data.results.length > 0) {
-      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + 1); // Process 1 item at a time
+      // Process up to 5 items per chunk (no subtitles/TV deep scrape = much faster)
+      const CHUNK_SIZE = 5;
+      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
       
-      await this.pMap(resultsToProcess, async (item: any) => {
+      for (const item of resultsToProcess) {
+        // Timeout guard — stop before Vercel kills us
+        if (this.isChunkTimedOut()) {
+          console.log(`[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`);
+          break;
+        }
+
         summary.items_processed++;
+        if (state.logId) {
+          const totalEstimated = allTasks.length * pagesPerGenre * 20;
+          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || 'Scanning...');
+        }
         const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
-        if (existing && genre.type === 'movie') return;
+        if (existing && genre.type === 'movie') continue;
 
         try {
           const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
           if (!resMetadata.ok) throw new Error(`Fetch failed`);
-          const metadata: any = await resMetadata.json();
+          const metadata = await resMetadata.json();
           
-          const finalType = classifyContentType(metadata, genre.type as any);
+          const finalType = classifyContentType(metadata, genre.type as 'movie' | 'tv');
           const platform = classifyPlatform(metadata, finalType);
           const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
           
@@ -823,71 +868,77 @@ export class ScraperService {
 
           if (dbItem) {
             await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
-            if (genre.type === 'tv') {
-              await this.scrapeTVDetails(dbItem.id, item.id);
-            }
-            await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+            // NOTE: TV details and subtitles removed from discovery chunks — run as separate tasks
             summary.items_added++;
           }
-        } catch (err: any) {
+        } catch {
           summary.items_failed++;
         }
-      }, 1); // Sequential processing within chunk for safety
-    }
-
-    // Determine next state
-    let nextGenreIndex = currentGenreIndex;
-    let nextPage = currentPage;
-    let nextItemIndex = currentItemIndex + 1;
-
-    if (nextItemIndex >= (data.results?.length || 0)) {
-      nextItemIndex = 0;
-      nextPage = currentPage + 1;
-      if (nextPage > pagesPerGenre || !data.results || data.results.length === 0) {
-        nextGenreIndex++;
-        nextPage = 1;
       }
     }
 
-    const hasMore = nextGenreIndex < allTasks.length;
-    
+    // Determine next state based on how many items we actually processed
+    const actualProcessed = summary.items_processed;
+    let nextItemIndex = currentItemIndex + actualProcessed;
+
+    if (nextItemIndex >= (data.results?.length || 0)) {
+      nextItemIndex = 0;
+      currentPage = currentPage + 1;
+      if (currentPage > pagesPerGenre || !data.results || data.results.length === 0) {
+        currentGenreIndex++;
+        currentPage = 1;
+      }
+    }
+
+    const hasMore = currentGenreIndex < allTasks.length;
     const total = allTasks.length * pagesPerGenre * 20;
 
     return {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { genres: allTasks, currentGenreIndex: nextGenreIndex, currentPage: nextPage, currentItemIndex: nextItemIndex } : {}
+      nextState: hasMore ? { genres: allTasks, currentGenreIndex, currentPage, currentItemIndex: nextItemIndex } : {}
     };
   }
 
-  public async runTrendingChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+  public async runTrendingChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     const scraperConfig = await this.getScraperConfig();
     
-    let items = state.items;
-    if (!items) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let items: any[] = (state.items as any[]) || [];
+    if (items.length === 0) {
       const res = await this.fetchWithTimeout(`https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`);
       const data = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       items = data.results?.filter((i: any) => i.media_type === 'movie' || i.media_type === 'tv') || [];
     }
 
-    const offset = state.offset || 0;
-    const chunkSize = 5; // Process 5 items per chunk
+    const offset = (state.offset as number) || 0;
+    const chunkSize = 5;
     const chunk = items.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) {
       return { summary, hasMore: false, total: 0, nextState: {} };
     }
 
-    await this.pMap(chunk, async (item: any) => {
+    for (const item of chunk) {
+      if (this.isChunkTimedOut()) {
+        console.log(`[Chunk] Trending timeout guard triggered. Yielding...`);
+        break;
+      }
+
       summary.items_processed++;
+      if (state.logId) {
+        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+        await this.updateLogProgress(state.logId as string, currentTotalProcessed, items.length, item.title || item.name || 'Scanning...');
+      }
       try {
-        const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
         const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-        const metadata: any = await resMetadata.json();
+        const metadata = await resMetadata.json();
         
-        const finalType = classifyContentType(metadata, item.media_type as any);
+        const finalType = classifyContentType(metadata, item.media_type as 'movie' | 'tv');
         const platform = classifyPlatform(metadata, finalType);
         
         const { data: dbItem } = await supabase.from('contents').upsert({
@@ -897,7 +948,7 @@ export class ScraperService {
           status: scraperConfig.auto_approve ? 'approved' : 'pending',
           platform,
           cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-          genre_names: metadata.genres?.map((g: any) => g.name) || [],
+          genre_names: metadata.genres?.map((g: { name: string }) => g.name) || [],
           overview: metadata.overview,
           poster_path: metadata.poster_path,
           backdrop_path: metadata.backdrop_path,
@@ -910,18 +961,17 @@ export class ScraperService {
 
         if (dbItem) {
           await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
-          if (item.media_type === 'tv') await this.scrapeTVDetails(dbItem.id, item.id);
-          await SubtitleService.fetchAndUploadSubtitle(item.id, finalType as 'movie' | 'tv');
+          // NOTE: TV details and subtitles removed — run as separate tasks
           summary.items_added++;
         }
-      } catch (err) {
+      } catch {
         summary.items_failed++;
       }
-    }, 3);
+    }
 
-    const nextOffset = offset + chunkSize;
+    const actualProcessed = summary.items_processed;
+    const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < items.length;
-
     const total = items.length;
 
     return {
@@ -932,23 +982,34 @@ export class ScraperService {
     };
   }
 
-  public async runHealthCheckChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+  public async runHealthCheckChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    let links = state.links;
-    if (!links) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let links: any[] = (state.links as any[]) || [];
+    if (links.length === 0) {
       const { data } = await supabase.from('embed_links').select('id, url, content_id');
       links = data || [];
     }
 
-    const offset = state.offset || 0;
-    const chunkSize = 15; // 15 links per chunk
+    const offset = (state.offset as number) || 0;
+    const chunkSize = 10;
     const chunk = links.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
 
-    await this.pMap(chunk, async (link: any) => {
+    for (const link of chunk) {
+      if (this.isChunkTimedOut()) {
+        console.log(`[Chunk] HealthCheck timeout guard triggered. Yielding...`);
+        break;
+      }
+
       summary.items_processed++;
+      if (state.logId) {
+        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+        await this.updateLogProgress(state.logId as string, currentTotalProcessed, links.length, link.url || 'Scanning...');
+      }
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000); 
@@ -956,39 +1017,50 @@ export class ScraperService {
         clearTimeout(timeout);
         const isHealthy = res.ok || res.status === 403 || res.status === 206; 
         await supabase.from('contents').update({ is_healthy: isHealthy, last_checked_at: new Date().toISOString() }).eq('id', link.content_id);
-      } catch (err) {
+      } catch {
         summary.items_failed++;
       }
-    }, 5);
+    }
 
-    const nextOffset = offset + chunkSize;
+    const actualProcessed = summary.items_processed;
+    const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < links.length;
-
     const total = links.length;
     return { summary, hasMore, total, nextState: hasMore ? { links, offset: nextOffset } : {} };
   }
 
-  public async runSyncMetadataChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+  public async runSyncMetadataChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    let contents = state.contents;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let contents = state.contents as any[] | undefined;
     if (!contents) {
       const { data } = await supabase.from('contents').select('id, tmdb_id, type');
       contents = data || [];
     }
 
-    const offset = state.offset || 0;
-    const chunkSize = 3; // Reduced for Vercel
+    const offset = (state.offset as number) || 0;
+    const chunkSize = 3;
     const chunk = contents.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
 
-    await this.pMap(chunk, async (item: any) => {
+    for (const item of chunk) {
+      if (this.isChunkTimedOut()) {
+        console.log(`[Chunk] SyncMetadata timeout guard triggered. Yielding...`);
+        break;
+      }
+
       summary.items_processed++;
+      if (state.logId) {
+        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+        await this.updateLogProgress(state.logId as string, currentTotalProcessed, contents.length, item.tmdb_id || 'Scanning...');
+      }
       try {
         const tmdbType = item.type === 'movie' ? 'movie' : 'tv';
         const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-        const metadata: any = await resMetadata.json();
+        const metadata = await resMetadata.json();
         
         const finalType = classifyContentType(metadata, tmdbType);
         const platform = classifyPlatform(metadata, finalType);
@@ -996,7 +1068,7 @@ export class ScraperService {
         await supabase.from('contents').update({
           type: finalType,
           platform,
-          genre_names: metadata.genres?.map((g: any) => g.name) || [],
+          genre_names: metadata.genres?.map((g: { name: string }) => g.name) || [],
           cast_data: metadata.credits?.cast?.slice(0, 10) || [],
           overview: metadata.overview,
           poster_path: metadata.poster_path,
@@ -1006,46 +1078,59 @@ export class ScraperService {
           tv_status: metadata.status
         }).eq('id', item.id);
 
-        if (tmdbType === 'tv') await this.scrapeTVDetails(item.id, item.tmdb_id);
+        // TV details removed from sync chunk — too heavy for Vercel serverless
         summary.items_added++;
-      } catch (err) {
+      } catch {
         summary.items_failed++;
       }
-    }, 1);
+    }
 
-    const nextOffset = offset + chunkSize;
+    const actualProcessed = summary.items_processed;
+    const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < contents.length;
     const total = contents.length;
     return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };
   }
 
-  public async runSyncSubtitlesChunk(state: any = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: any }> {
+  public async runSyncSubtitlesChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
-    let contents = state.contents;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let contents = state.contents as any[] | undefined;
     if (!contents) {
       const { data } = await supabase.from('contents').select('tmdb_id, type');
       contents = data || [];
     }
 
-    const offset = state.offset || 0;
-    const chunkSize = 5;
+    const offset = (state.offset as number) || 0;
+    const chunkSize = 3; // Reduced from 5 — subtitles are slow (up to 4 API calls each)
     const chunk = contents.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
 
-    await this.pMap(chunk, async (item: any) => {
+    for (const item of chunk) {
+      if (this.isChunkTimedOut()) {
+        console.log(`[Chunk] SyncSubtitles timeout guard triggered. Yielding...`);
+        break;
+      }
+
       summary.items_processed++;
+      if (state.logId) {
+        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+        await this.updateLogProgress(state.logId as string, currentTotalProcessed, contents.length, item.tmdb_id || 'Scanning...');
+      }
       try {
         const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
         if (result.status === 'success') summary.items_added++;
         else summary.items_failed++;
-      } catch (err) {
+      } catch {
         summary.items_failed++;
       }
-    }, 1);
+    }
 
-    const nextOffset = offset + chunkSize;
+    const actualProcessed = summary.items_processed;
+    const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < contents.length;
     const total = contents.length;
     return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };

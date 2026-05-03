@@ -48,7 +48,7 @@ export class SubtitleService {
     return vtt;
   }
 
-  private static async fetchWithTimeout(url: string, options: any = {}, timeout = 15000): Promise<Response> {
+  private static async fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 15000): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {
@@ -181,7 +181,9 @@ export class SubtitleService {
           };
         }
       }
-    } catch (e) {}
+    } catch {
+      // Ignored
+    }
 
     let srtContent = '';
     let foundLang = 'id';
@@ -189,20 +191,20 @@ export class SubtitleService {
     // 1. Try Indonesian (OS -> Subdl)
     try {
       srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'id');
-    } catch (errOS) {
+    } catch {
       try {
         srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'ID');
-      } catch (errSubdl) {
+      } catch {
         // 2. Fallback to English (OS -> Subdl)
         try {
           console.log(`[Subtitles] ID failed for ${tmdbId}. Trying EN Fallback...`);
           srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'en');
           foundLang = 'en';
-        } catch (errOSEn) {
+        } catch {
           try {
             srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'EN');
             foundLang = 'en';
-          } catch (errSubdlEn) {
+          } catch {
             return { status: 'error', reason: 'No subtitles found for ID or EN' };
           }
         }
@@ -229,8 +231,8 @@ export class SubtitleService {
         url: publicUrlData.publicUrl,
         language: foundLang
       };
-    } catch (err: any) {
-      return { status: 'error', reason: err.message };
+    } catch (err: unknown) {
+      return { status: 'error', reason: err instanceof Error ? err.message : String(err) };
     }
   }
 }

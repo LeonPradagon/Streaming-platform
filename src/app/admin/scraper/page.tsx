@@ -47,9 +47,22 @@ export default function ScraperAdmin() {
       setLogs(data);
       const latest = data[0];
       if (latest && latest.status === 'running') {
-        if (latest.progress) setProgress(latest.progress);
-        setActiveTask(latest.task_name);
-        setIsLoading(true);
+        // Check if this task is stale (no update in 5 minutes)
+        const lastTouch = latest.progress?._lastUpdated || latest.created_at;
+        const age = Date.now() - new Date(lastTouch).getTime();
+        const isStale = age > 5 * 60 * 1000; // 5 minutes
+
+        if (isStale) {
+          // Task is stale — don't show progress, the cleanup will handle it
+          console.warn(`[Scraper UI] Latest task is stale (${Math.round(age/1000)}s). Not showing progress.`);
+          setProgress(null);
+          setActiveTask(null);
+          setIsLoading(false);
+        } else {
+          if (latest.progress) setProgress(latest.progress);
+          setActiveTask(latest.task_name);
+          setIsLoading(true);
+        }
       } else if (latest && latest.status !== 'running') {
         setProgress(null);
         setActiveTask(null);
@@ -98,42 +111,83 @@ export default function ScraperAdmin() {
     setIsLoading(true);
     setActiveTask(taskType);
     
-    let currentState = {};
+    let currentState: Record<string, unknown> = {};
     let isRunning = true;
-    let accumulatedSummary = { items_processed: 0, items_added: 0, items_failed: 0 };
-    let totalItemsEstimated = 100;
+    let consecutiveErrors = 0;
+    const MAX_RETRIES = 5;
+    const MAX_TOTAL_TIME_MS = 10 * 60 * 1000; // 10 minutes total timeout
+    const startedAt = Date.now();
 
     try {
       while (isRunning) {
-        const response = await fetch('/api/scraper/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task: taskType, state: currentState })
-        });
-        
-        if (!response.ok) break;
-
-        const data = await response.json();
-        if (data.total) totalItemsEstimated = data.total;
-        if (data.summary) {
-          accumulatedSummary.items_processed += data.summary.items_processed || 0;
+        // Safety: total timeout to prevent infinite loops
+        if (Date.now() - startedAt > MAX_TOTAL_TIME_MS) {
+          console.warn('[Scraper UI] Total timeout reached (10 min). Stopping.');
+          try { await fetch('/api/scraper/stop', { method: 'POST' }); } catch {}
+          adminAlert.error('Timeout', 'Scraper dihentikan karena melebihi batas waktu 10 menit.');
+          break;
         }
 
-        if (data.hasMore && data.nextState) {
-          currentState = data.nextState;
-          await new Promise(resolve => setTimeout(resolve, 800));
-        } else {
-          isRunning = false;
-          adminAlert.success('Selesai', `Tugas ${taskType} berhasil diselesaikan.`);
+        try {
+          const response = await fetch('/api/scraper/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task: taskType, state: currentState })
+          });
+          
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+            const errMsg = errData.error || `Server error: ${response.status}`;
+            
+            // Special handling: if task is "already running", force stop and retry
+            if (response.status === 400 && errMsg.includes('already running')) {
+              console.warn('[Scraper UI] Task already running in DB. Force-stopping and retrying...');
+              try { await fetch('/api/scraper/stop', { method: 'POST' }); } catch {}
+              // Reset state and retry after a short pause
+              currentState = {};
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              continue;
+            }
+            
+            throw new Error(errMsg);
+          }
+
+          // Reset error counter on success
+          consecutiveErrors = 0;
+
+          const data = await response.json();
+
+          if (data.hasMore && data.nextState) {
+            currentState = data.nextState;
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } else {
+            isRunning = false;
+            adminAlert.success('Selesai', `Tugas ${taskType} berhasil diselesaikan.`);
+          }
+          fetchLogs();
+
+        } catch (chunkErr) {
+          consecutiveErrors++;
+          console.error(`[Scraper UI] Chunk error (${consecutiveErrors}/${MAX_RETRIES}):`, chunkErr);
+          
+          if (consecutiveErrors >= MAX_RETRIES) {
+            // Auto-cleanup: mark task as failed in DB so it doesn't stay stuck
+            try { await fetch('/api/scraper/stop', { method: 'POST' }); } catch {}
+            adminAlert.error('Error', `Scraper gagal setelah ${MAX_RETRIES} percobaan. Task telah dihentikan otomatis.`);
+            isRunning = false;
+          } else {
+            // Exponential backoff before retry
+            const backoffMs = Math.pow(2, consecutiveErrors) * 1000;
+            console.log(`[Scraper UI] Retrying in ${backoffMs/1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+          }
         }
-        fetchLogs();
       }
-    } catch (err) {
-      adminAlert.error('Error', 'Koneksi terputus.');
     } finally {
       setIsLoading(false);
       setActiveTask(null);
       setProgress(null);
+      fetchLogs();
     }
   };
 
