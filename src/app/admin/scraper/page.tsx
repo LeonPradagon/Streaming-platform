@@ -43,31 +43,40 @@ export default function ScraperAdmin() {
       .select('*')
       .order('created_at', { ascending: false })
       .limit(15);
-    if (data) {
-      setLogs(data);
-      const latest = data[0];
-      if (latest && latest.status === 'running') {
-        // Check if this task is stale (no update in 5 minutes)
-        const lastTouch = latest.progress?._lastUpdated || latest.created_at;
-        const age = Date.now() - new Date(lastTouch).getTime();
-        const isStale = age > 5 * 60 * 1000; // 5 minutes
+    if (!data) return;
 
-        if (isStale) {
-          // Task is stale — don't show progress, the cleanup will handle it
-          console.warn(`[Scraper UI] Latest task is stale (${Math.round(age/1000)}s). Not showing progress.`);
-          setProgress(null);
-          setActiveTask(null);
-          setIsLoading(false);
-        } else {
-          if (latest.progress) setProgress(latest.progress);
-          setActiveTask(latest.task_name);
-          setIsLoading(true);
-        }
-      } else if (latest && latest.status !== 'running') {
-        setProgress(null);
-        setActiveTask(null);
-        setIsLoading(false);
+    setLogs(data);
+
+    // If we're actively running a task from this browser, don't touch UI state
+    // The runTask loop manages its own progress/loading state
+    if (isLoading) return;
+
+    const latest = data[0];
+    if (latest && latest.status === 'running') {
+      // Check if this task is stale (no update in 3 minutes)
+      const lastTouch = latest.progress?._lastUpdated || latest.created_at;
+      const age = Date.now() - new Date(lastTouch).getTime();
+      const isStale = age > 3 * 60 * 1000;
+
+      if (isStale) {
+        // Auto-clean orphaned stale task from DB
+        console.warn(`[Scraper UI] Auto-cleaning stale task (${Math.round(age/1000)}s old)`);
+        await supabase
+          .from('scraper_logs')
+          .update({ 
+            status: 'failed', 
+            error_message: 'Auto-cleaned: task was stale',
+            finished_at: new Date().toISOString()
+          })
+          .eq('id', latest.id);
+      } else {
+        // Another source (CRON, another tab) is running a task — show its progress
+        if (latest.progress) setProgress(latest.progress);
+        setActiveTask(latest.task_name);
       }
+    } else {
+      setProgress(null);
+      setActiveTask(null);
     }
   };
 
@@ -82,9 +91,10 @@ export default function ScraperAdmin() {
       .channel('scraper-status')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scraper_logs' }, (payload) => {
         const updatedLog = payload.new as any;
-        if (updatedLog && updatedLog.status === 'running') {
+        if (updatedLog && updatedLog.status === 'running' && updatedLog.progress) {
           setProgress(updatedLog.progress);
-        } else {
+        } else if (!isLoading) {
+          // Only clear progress if we're NOT actively running chunks
           setProgress(null);
         }
         fetchLogs();
@@ -115,16 +125,16 @@ export default function ScraperAdmin() {
     let isRunning = true;
     let consecutiveErrors = 0;
     const MAX_RETRIES = 5;
-    const MAX_TOTAL_TIME_MS = 10 * 60 * 1000; // 10 minutes total timeout
+    const MAX_TOTAL_TIME_MS = 30 * 60 * 1000; // 30 minutes total timeout
     const startedAt = Date.now();
 
     try {
       while (isRunning) {
         // Safety: total timeout to prevent infinite loops
         if (Date.now() - startedAt > MAX_TOTAL_TIME_MS) {
-          console.warn('[Scraper UI] Total timeout reached (10 min). Stopping.');
+          console.warn('[Scraper UI] Total timeout reached (30 min). Stopping.');
           try { await fetch('/api/scraper/stop', { method: 'POST' }); } catch {}
-          adminAlert.error('Timeout', 'Scraper dihentikan karena melebihi batas waktu 10 menit.');
+          adminAlert.error('Timeout', 'Scraper dihentikan karena melebihi batas waktu 30 menit.');
           break;
         }
 
