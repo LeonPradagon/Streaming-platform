@@ -129,7 +129,7 @@ export class ScraperService {
    * Chunk timeout guard — returns true if we should stop processing to stay within Vercel's 60s limit
    */
   private chunkStartTime = 0;
-  private isChunkTimedOut(safetyMs = 45000): boolean {
+  private isChunkTimedOut(safetyMs = 8000): boolean {
     if (!this.chunkStartTime) return false;
     return (Date.now() - this.chunkStartTime) >= safetyMs;
   }
@@ -336,6 +336,64 @@ export class ScraperService {
   }
 
   /**
+   * Netflix Priority Discovery Task
+   */
+  public async runNetflixDiscovery(pagesPerType: number = 3): Promise<ScrapeTaskSummary> {
+    const taskName = 'Netflix Priority Discovery';
+    const logId = await this.createLog(taskName);
+    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    
+    try {
+      await this.executeNetflixDiscovery(pagesPerType, logId, summary);
+      if (logId) await this.updateLog(logId, 'success', summary);
+    } catch (err: any) {
+      console.error("Netflix Discovery error:", err);
+      if (err.message === 'Task Aborted') return summary; 
+      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+    }
+
+    return summary;
+  }
+
+  private async executeNetflixDiscovery(pagesPerType: number, logId: string, summary: ScrapeTaskSummary) {
+    const scraperConfig = await this.getScraperConfig();
+    
+    const tasks = [
+      { type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc` },
+      { type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc` }
+    ];
+
+    for (const task of tasks) {
+      for (let page = 1; page <= pagesPerType; page++) {
+        await this.checkTaskActive(logId);
+        console.log(`[Scraper] Netflix Priority: ${task.type.toUpperCase()} | Page ${page}`);
+        
+        const res = await this.fetchWithTimeout(`${task.url}&page=${page}`);
+        const data = await res.json();
+
+        if (data.results && data.results.length > 0) {
+          await this.pMap(data.results, async (item: any) => {
+            summary.items_processed++;
+            if (logId) {
+              const totalEstimated = tasks.length * pagesPerType * 20;
+              await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || 'Scanning Netflix...');
+            }
+
+            try {
+              const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig);
+              if (saved) summary.items_added++;
+            } catch {
+              summary.items_failed++;
+            }
+          }, 3, () => this.checkTaskActive(logId));
+        }
+      }
+    }
+  }
+
+  /**
    * Full Discovery & Scrape Task with Page Tracking
    */
   public async runDiscovery(pagesPerGenre: number = 3): Promise<ScrapeTaskSummary> {
@@ -404,74 +462,22 @@ export class ScraperService {
             await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || 'Scanning...');
           }
 
-          const { data: existing } = await supabase
-            .from('contents')
-            .select('id, status, updated_at')
-            .eq('tmdb_id', item.id)
-            .single();
-
-          if (existing && genre.type === 'movie') return;
-
           try {
-            // Check if item was updated in the last 24h to avoid redundant deep scrapes
-            if (existing && existing.updated_at) {
-              const lastUpdate = new Date(existing.updated_at).getTime();
-              const now = new Date().getTime();
-              if (now - lastUpdate < 24 * 60 * 60 * 1000) {
-                 // Still check for provider links if needed, but maybe skip deep metadata fetch
-                 // For now, let's just skip completely to be fast
-                 return;
+            const totalEstimated = allTasks.length * pagesPerGenre * 20;
+            const saved = await this.processAndSaveContent(item, genre.type as any, scraperConfig, {
+              logId,
+              summary,
+              totalEstimated
+            });
+            
+            if (saved) {
+              try {
+                await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
+              } catch (sErr) {
+                console.warn(`[Scraper] Subtitle fetch failed for ${item.id}:`, sErr);
               }
+              summary.items_added++;
             }
-
-            const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-            if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
-            const metadata: any = await resMetadata.json();
-            
-            const finalType = classifyContentType(metadata, genre.type as any);
-            const platform = classifyPlatform(metadata, finalType);
-            const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
-            
-            const { data: dbItem, error: upsertError } = await supabase
-              .from('contents')
-              .upsert({
-                tmdb_id: item.id,
-                title: item.title || item.name,
-                type: finalType,
-                ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
-                platform,
-                cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-                genre_names: genreNames,
-                overview: metadata.overview,
-                poster_path: metadata.poster_path,
-                backdrop_path: metadata.backdrop_path,
-                vote_average: metadata.vote_average,
-                popularity: item.popularity || metadata.popularity || 0,
-                release_date: metadata.release_date || metadata.first_air_date,
-                tv_status: metadata.status,
-                is_healthy: true,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'tmdb_id' })
-              .select().single();
-
-            if (upsertError) throw upsertError;
-            
-            await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
-            
-            if (genre.type === 'tv') {
-              const totalEstimated = allTasks.length * pagesPerGenre * 20;
-              await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, totalEstimated, item.title || item.name);
-            }
-            
-            // Subtitles are secondary, don't let them crash the main flow
-            try {
-              await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
-            } catch (sErr) {
-              console.warn(`[Scraper] Subtitle fetch failed for ${item.id}:`, sErr);
-            }
-            
-            summary.items_added++;
-
           } catch (err: any) {
             summary.items_failed++;
             if (summary.errors.length < 50) { // Limit error log size
@@ -524,56 +530,20 @@ export class ScraperService {
         }
 
         try {
-          const { data: existing } = await supabase
-            .from('contents')
-            .select('id, status, updated_at')
-            .eq('tmdb_id', item.id)
-            .single();
-
-          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-          if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
-          const metadata: TMDBMetadata = await resMetadata.json();
+          const saved = await this.processAndSaveContent(item, item.media_type as 'movie' | 'tv', scraperConfig, {
+            logId,
+            summary,
+            totalEstimated: data.results.length
+          });
           
-          const finalType = classifyContentType(metadata, item.media_type as any);
-          const platform = classifyPlatform(metadata, finalType);
-          const genreNames = metadata.genres?.map(g => g.name) || [];
-
-          const { data: dbItem, error: upsertError } = await supabase
-            .from('contents')
-            .upsert({
-              tmdb_id: item.id,
-              title: item.title || item.name,
-              type: finalType,
-              ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
-              platform,
-              cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-              genre_names: genreNames,
-              overview: metadata.overview,
-              poster_path: metadata.poster_path,
-              backdrop_path: metadata.backdrop_path,
-              vote_average: metadata.vote_average,
-              popularity: item.popularity || metadata.popularity || 0,
-              release_date: metadata.release_date || metadata.first_air_date,
-              tv_status: metadata.status,
-              is_healthy: true
-            }, { onConflict: 'tmdb_id' })
-            .select().single();
-
-          if (upsertError) throw upsertError;
-          
-          await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
-          
-          if (item.media_type === 'tv') {
-            await this.scrapeTVDetails(dbItem.id, item.id, logId, summary.items_processed, data.results.length, item.title || item.name);
-          }
-          
-          try {
-              await SubtitleService.fetchAndUploadSubtitle(item.id, finalType === 'movie' ? 'movie' : 'tv');
+          if (saved) {
+            try {
+              await SubtitleService.fetchAndUploadSubtitle(item.id, item.media_type as 'movie' | 'tv');
             } catch (sErr) {
               console.warn(`[Scraper] Subtitle fetch failed for trending ${item.id}:`, sErr);
             }
-          
-          summary.items_added++;
+            summary.items_added++;
+          }
         } catch (err: any) {
           summary.items_failed++;
         }
@@ -582,13 +552,14 @@ export class ScraperService {
   }
 
   /**
-   * Full Daily Routine: Trending + Genre Discovery
+   * Full Daily Routine: Netflix + Trending + Genre Discovery
    */
   public async runFullRoutine(pages: number = 5): Promise<ScrapeTaskSummary[]> {
     console.log(`🚀 Starting Full Scraper Routine (Intensity: ${pages} pages)...`);
+    const netflix = await this.runNetflixDiscovery(pages);
     const trending = await this.runTrendingDiscovery();
     const discovery = await this.runDiscovery(pages);
-    return [trending, discovery];
+    return [netflix, trending, discovery];
   }
 
   /**
@@ -752,6 +723,44 @@ export class ScraperService {
     return summary;
   }
 
+  private async checkVideoAvailability(tmdbId: number, type: 'movie' | 'tv'): Promise<boolean> {
+    try {
+      const vidlinkUrl = `https://vidlink.pro/${type}/${tmdbId}${type === 'tv' ? '/1/1' : ''}`;
+      const vidsrcUrl = `https://vidsrc.net/embed/${type}?tmdb=${tmdbId}`;
+
+      const checkProvider = async (url: string, headers: any): Promise<boolean> => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        try {
+          const res = await fetch(url, { method: 'HEAD', headers, signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.status === 404 && url.includes('vidsrc')) return Promise.reject(new Error('404 Not Found'));
+          if (res.ok || res.status === 403 || res.status === 206) return true;
+          return Promise.reject(new Error('Invalid status'));
+        } catch (e) {
+          clearTimeout(timeoutId);
+          return Promise.reject(e);
+        }
+      };
+
+      const promises = [
+        checkProvider(vidlinkUrl, { 'Referer': 'https://vidlink.pro/', 'User-Agent': 'Mozilla/5.0' }),
+        checkProvider(vidsrcUrl, { 'User-Agent': 'Mozilla/5.0' })
+      ];
+
+      try {
+        await Promise.any(promises);
+        return true;
+      } catch (e) {
+        // If both rejected, assume true to avoid skipping valid movies during server hiccups
+        return true; 
+      }
+    } catch (err) {
+      console.warn(`[Scraper] checkVideoAvailability error for ${tmdbId}, assuming true`);
+      return true;
+    }
+  }
+
   private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: Record<string, any>) {
     const isTV = type !== 'movie';
     const providers = [];
@@ -769,19 +778,182 @@ export class ScraperService {
       providers.push({ name: 'Videasy', url: `https://player.videasy.net/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
     }
 
-    for (const p of providers) {
-      await supabase.from('embed_links').upsert({
+    if (providers.length > 0) {
+      const embedLinks = providers.map(p => ({
         content_id: contentId,
         provider: p.name,
         url: p.url,
         quality: 'HD'
-      }, { onConflict: 'content_id,provider' });
+      }));
+      await supabase.from('embed_links').upsert(embedLinks, { onConflict: 'content_id,provider' });
     }
+  }
+
+  private async processAndSaveContent(
+    item: any,
+    genreType: 'movie' | 'tv',
+    scraperConfig: Record<string, any>,
+    options?: {
+      logId?: string;
+      summary?: ScrapeTaskSummary;
+      totalEstimated?: number;
+      skipDeepScrapeTV?: boolean;
+    }
+  ): Promise<boolean> {
+    const { data: existing } = await supabase
+      .from('contents')
+      .select('id, status, updated_at')
+      .eq('tmdb_id', item.id)
+      .single();
+
+    if (existing && genreType === 'movie') return false;
+
+    // Check if item was updated in the last 24h to avoid redundant deep scrapes
+    if (existing && existing.updated_at) {
+      const lastUpdate = new Date(existing.updated_at).getTime();
+      const now = new Date().getTime();
+      if (now - lastUpdate < 24 * 60 * 60 * 1000) {
+         return false;
+      }
+    }
+
+    const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genreType}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+    if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
+    const metadata: any = await resMetadata.json();
+    
+    const finalType = classifyContentType(metadata, genreType);
+    
+    // VERIFY VIDEO EXISTS BEFORE SAVING
+    const isAvailable = await this.checkVideoAvailability(item.id, genreType);
+    if (!isAvailable) {
+       console.log(`[Scraper] Video not available for ${item.title || item.name}, skipping.`);
+       return false;
+    }
+
+    const platform = classifyPlatform(metadata, finalType);
+    const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
+    
+    const { data: dbItem, error: upsertError } = await supabase
+      .from('contents')
+      .upsert({
+        tmdb_id: item.id,
+        title: item.title || item.name,
+        type: finalType,
+        ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
+        platform,
+        cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+        genre_names: genreNames,
+        overview: metadata.overview,
+        poster_path: metadata.poster_path,
+        backdrop_path: metadata.backdrop_path,
+        vote_average: metadata.vote_average,
+        popularity: item.popularity || metadata.popularity || 0,
+        release_date: metadata.release_date || metadata.first_air_date,
+        tv_status: metadata.status,
+        is_healthy: true,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'tmdb_id' })
+      .select().single();
+
+    if (upsertError) throw upsertError;
+    
+    await this.addProviderLinks(dbItem.id, genreType, item.id, scraperConfig);
+    
+    // Optionally fetch TV Details if requested and available
+    if (genreType === 'tv' && options?.logId && options?.summary && options?.totalEstimated && !options?.skipDeepScrapeTV) {
+      await this.scrapeTVDetails(dbItem.id, item.id, options.logId, options.summary.items_processed, options.totalEstimated, item.title || item.name);
+    }
+    
+    return true;
   }
 
   // ==========================================
   // CHUNKED EXECUTION FOR SERVERLESS (VERCEL)
   // ==========================================
+
+  public async runNetflixDiscoveryChunk(pagesPerType: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const scraperConfig = await this.getScraperConfig();
+    
+    let allTasks = state.tasks as Array<{ type: string; url: string }> | undefined;
+    if (!allTasks) {
+      allTasks = [
+        { type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc` },
+        { type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc` }
+      ];
+    }
+
+    let currentTaskIndex = (state.currentTaskIndex as number) || 0;
+    let currentPage = (state.currentPage as number) || 1;
+    let currentItemIndex = (state.currentItemIndex as number) || 0;
+
+    if (currentTaskIndex >= allTasks.length) {
+      return { summary, hasMore: false, total: 0, nextState: {} };
+    }
+
+    const task = allTasks[currentTaskIndex];
+    console.log(`[Chunk] Netflix Priority: ${task.type.toUpperCase()} | Page ${currentPage}`);
+
+    const res = await this.fetchWithTimeout(`${task.url}&page=${currentPage}`);
+    const data = await res.json();
+
+    if (data.results && data.results.length > 0) {
+      const CHUNK_SIZE = 3;
+      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
+      
+      const tmdbIds = resultsToProcess.map((i: any) => i.id);
+      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
+      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+
+      for (const item of resultsToProcess) {
+        if (this.isChunkTimedOut()) {
+          console.log(`[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`);
+          break;
+        }
+
+        summary.items_processed++;
+        if (state.logId) {
+          const totalEstimated = allTasks.length * pagesPerType * 20;
+          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || 'Scanning Netflix...');
+        }
+        
+        if (existingIds.has(item.id) && task.type === 'movie') continue;
+
+        try {
+          const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig, {
+            skipDeepScrapeTV: true
+          });
+          if (saved) summary.items_added++;
+        } catch {
+          summary.items_failed++;
+        }
+      }
+    }
+
+    const actualProcessed = summary.items_processed;
+    let nextItemIndex = currentItemIndex + actualProcessed;
+
+    if (nextItemIndex >= (data.results?.length || 0)) {
+      nextItemIndex = 0;
+      currentPage = currentPage + 1;
+      if (currentPage > pagesPerType || !data.results || data.results.length === 0) {
+        currentTaskIndex++;
+        currentPage = 1;
+      }
+    }
+
+    const hasMore = currentTaskIndex < allTasks.length;
+    const total = allTasks.length * pagesPerType * 20;
+
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { tasks: allTasks, currentTaskIndex, currentPage, currentItemIndex: nextItemIndex } : {}
+    };
+  }
 
   public async runDiscoveryChunk(pagesPerGenre: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
     this.chunkStartTime = Date.now();
@@ -820,10 +992,14 @@ export class ScraperService {
     const data = await res.json();
 
     if (data.results && data.results.length > 0) {
-      // Process up to 5 items per chunk (no subtitles/TV deep scrape = much faster)
-      const CHUNK_SIZE = 5;
+      // Process up to 3 items per chunk (no subtitles/TV deep scrape = much faster)
+      const CHUNK_SIZE = 3;
       const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
       
+      const tmdbIds = resultsToProcess.map((i: any) => i.id);
+      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
+      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+
       for (const item of resultsToProcess) {
         // Timeout guard — stop before Vercel kills us
         if (this.isChunkTimedOut()) {
@@ -837,40 +1013,14 @@ export class ScraperService {
           const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
           await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || 'Scanning...');
         }
-        const { data: existing } = await supabase.from('contents').select('id').eq('tmdb_id', item.id).single();
-        if (existing && genre.type === 'movie') continue;
+        
+        if (existingIds.has(item.id) && genre.type === 'movie') continue;
 
         try {
-          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genre.type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-          if (!resMetadata.ok) throw new Error(`Fetch failed`);
-          const metadata = await resMetadata.json();
-          
-          const finalType = classifyContentType(metadata, genre.type as 'movie' | 'tv');
-          const platform = classifyPlatform(metadata, finalType);
-          const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
-          
-          const { data: dbItem } = await supabase.from('contents').upsert({
-            tmdb_id: item.id,
-            title: item.title || item.name,
-            type: finalType,
-            status: scraperConfig.auto_approve ? 'approved' : 'pending',
-            platform,
-            cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-            genre_names: genreNames,
-            overview: metadata.overview,
-            poster_path: metadata.poster_path,
-            backdrop_path: metadata.backdrop_path,
-            vote_average: metadata.vote_average,
-            popularity: item.popularity || metadata.popularity || 0,
-            release_date: metadata.release_date || metadata.first_air_date,
-            is_healthy: true
-          }, { onConflict: 'tmdb_id' }).select().single();
-
-          if (dbItem) {
-            await this.addProviderLinks(dbItem.id, genre.type, item.id, scraperConfig);
-            // NOTE: TV details and subtitles removed from discovery chunks — run as separate tasks
-            summary.items_added++;
-          }
+          const saved = await this.processAndSaveContent(item, genre.type as any, scraperConfig, {
+            skipDeepScrapeTV: true
+          });
+          if (saved) summary.items_added++;
         } catch {
           summary.items_failed++;
         }
@@ -916,12 +1066,16 @@ export class ScraperService {
     }
 
     const offset = (state.offset as number) || 0;
-    const chunkSize = 5;
+    const chunkSize = 3;
     const chunk = items.slice(offset, offset + chunkSize);
 
     if (chunk.length === 0) {
       return { summary, hasMore: false, total: 0, nextState: {} };
     }
+
+    const tmdbIds = chunk.map((i: any) => i.id);
+    const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
+    const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
 
     for (const item of chunk) {
       if (this.isChunkTimedOut()) {
@@ -934,36 +1088,14 @@ export class ScraperService {
         const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
         await this.updateLogProgress(state.logId as string, currentTotalProcessed, items.length, item.title || item.name || 'Scanning...');
       }
-      try {
-        const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${item.media_type}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-        const metadata = await resMetadata.json();
-        
-        const finalType = classifyContentType(metadata, item.media_type as 'movie' | 'tv');
-        const platform = classifyPlatform(metadata, finalType);
-        
-        const { data: dbItem } = await supabase.from('contents').upsert({
-          tmdb_id: item.id,
-          title: item.title || item.name,
-          type: finalType,
-          status: scraperConfig.auto_approve ? 'approved' : 'pending',
-          platform,
-          cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-          genre_names: metadata.genres?.map((g: { name: string }) => g.name) || [],
-          overview: metadata.overview,
-          poster_path: metadata.poster_path,
-          backdrop_path: metadata.backdrop_path,
-          vote_average: metadata.vote_average,
-          popularity: item.popularity || metadata.popularity || 0,
-          release_date: metadata.release_date || metadata.first_air_date,
-          tv_status: metadata.status,
-          is_healthy: true
-        }, { onConflict: 'tmdb_id' }).select().single();
+      
+      if (existingIds.has(item.id) && item.media_type === 'movie') continue;
 
-        if (dbItem) {
-          await this.addProviderLinks(dbItem.id, finalType, item.id, scraperConfig);
-          // NOTE: TV details and subtitles removed — run as separate tasks
-          summary.items_added++;
-        }
+      try {
+        const saved = await this.processAndSaveContent(item, item.media_type as 'movie' | 'tv', scraperConfig, {
+            skipDeepScrapeTV: true
+        });
+        if (saved) summary.items_added++;
       } catch {
         summary.items_failed++;
       }

@@ -48,6 +48,7 @@ export default async function ApprovePage() {
                   src={getTMDBImageUrl(item.poster_path, 'w185')} 
                   alt={item.title} 
                   fill
+                  sizes="96px"
                   className="object-cover"
                 />
               </div>

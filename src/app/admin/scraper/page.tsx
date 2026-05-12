@@ -59,16 +59,15 @@ export default function ScraperAdmin() {
       const isStale = age > 3 * 60 * 1000;
 
       if (isStale) {
-        // Auto-clean orphaned stale task from DB
+        // Auto-clean orphaned stale task via backend API to bypass RLS
         console.warn(`[Scraper UI] Auto-cleaning stale task (${Math.round(age/1000)}s old)`);
-        await supabase
-          .from('scraper_logs')
-          .update({ 
-            status: 'failed', 
-            error_message: 'Auto-cleaned: task was stale',
-            finished_at: new Date().toISOString()
-          })
-          .eq('id', latest.id);
+        try { 
+          await fetch('/api/scraper/stop', { method: 'POST' }); 
+        } catch (err) {
+          console.error('[Scraper UI] Failed to auto-clean stale task:', err);
+        }
+        setProgress(null);
+        setActiveTask(null);
       } else {
         // Another source (CRON, another tab) is running a task — show its progress
         if (latest.progress) setProgress(latest.progress);
@@ -125,16 +124,16 @@ export default function ScraperAdmin() {
     let isRunning = true;
     let consecutiveErrors = 0;
     const MAX_RETRIES = 5;
-    const MAX_TOTAL_TIME_MS = 30 * 60 * 1000; // 30 minutes total timeout
+    const MAX_TOTAL_TIME_MS = 120 * 60 * 1000; // 120 minutes total timeout
     const startedAt = Date.now();
 
     try {
       while (isRunning) {
         // Safety: total timeout to prevent infinite loops
         if (Date.now() - startedAt > MAX_TOTAL_TIME_MS) {
-          console.warn('[Scraper UI] Total timeout reached (30 min). Stopping.');
+          console.warn('[Scraper UI] Total timeout reached (120 min). Stopping.');
           try { await fetch('/api/scraper/stop', { method: 'POST' }); } catch {}
-          adminAlert.error('Timeout', 'Scraper dihentikan karena melebihi batas waktu 30 menit.');
+          adminAlert.error('Timeout', 'Scraper dihentikan karena melebihi batas waktu 120 menit.');
           break;
         }
 
