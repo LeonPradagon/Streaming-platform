@@ -20,6 +20,7 @@ export default async function BrowsePage({
   const sort = typeof unresolvedParams?.sort === 'string' ? unresolvedParams.sort : 'populer';
   const view = typeof unresolvedParams?.view === 'string' ? unresolvedParams.view : 'grid';
   const page = typeof unresolvedParams?.page === 'string' ? parseInt(unresolvedParams.page) : 1;
+  const platform = typeof unresolvedParams?.platform === 'string' ? unresolvedParams.platform : '';
   const PAGE_SIZE = 30;
 
   // Fetch from Supabase DB
@@ -38,6 +39,10 @@ export default async function BrowsePage({
   if (genre) {
     const capitalizedGenre = genre.charAt(0).toUpperCase() + genre.slice(1);
     query = query.contains('genre_names', [capitalizedGenre]);
+  }
+
+  if (platform && platform !== 'all') {
+    query = query.eq('platform', platform);
   }
 
   // Improved Smart Search (with sanitization)
@@ -107,7 +112,7 @@ export default async function BrowsePage({
 
         {/* Filters Section */}
         <div className="mb-12">
-          <BrowseFilters currentQ={q} currentType={type} currentSort={sort} currentView={view} currentGenre={genre} />
+          <BrowseFilters currentQ={q} currentType={type} currentSort={sort} currentView={view} currentGenre={genre} currentPlatform={platform} />
         </div>
 
         {/* Results */}

@@ -65,6 +65,11 @@ export async function POST(req: Request) {
       result = await scraper.runSyncMetadataChunk(state);
     } else if (task === 'subtitles') {
       result = await scraper.runSyncSubtitlesChunk(state);
+    } else if (task === 'reclassify') {
+      result = await scraper.runReclassifyContentChunk(state);
+    } else if (task.startsWith('network_')) {
+      const networkSlug = task.replace('network_', '');
+      result = await scraper.runNetworkDiscoveryChunk(networkSlug, intensity, state);
     } else {
       return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
     }
@@ -199,6 +204,11 @@ export async function GET(req: Request) {
       result = await scraper.runSyncMetadataChunk(cronState);
     } else if (task === 'subtitles') {
       result = await scraper.runSyncSubtitlesChunk(cronState);
+    } else if (task === 'reclassify') {
+      result = await scraper.runReclassifyContentChunk(cronState);
+    } else if (task.startsWith('network_')) {
+      const networkSlug = task.replace('network_', '');
+      result = await scraper.runNetworkDiscoveryChunk(networkSlug, intensity, cronState);
     } else {
       return NextResponse.json({ error: 'Invalid task' }, { status: 400 });
     }

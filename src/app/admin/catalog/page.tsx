@@ -12,13 +12,14 @@ import { approveAllContent } from '../approve/actions';
 import SweetDelete from '@/components/Admin/SweetDelete';
 import SweetApprove from '@/components/Admin/SweetApprove';
 import SweetEdit from './SweetEdit';
+import { NETWORK_CONFIGS } from '@/lib/tmdb';
 
 import CatalogFilters from './CatalogFilters';
 
 export default async function ContentCatalog({
   searchParams: searchParamsPromise,
 }: {
-  searchParams: Promise<{ q?: string; type?: string; status?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; type?: string; status?: string; page?: string; platform?: string }>;
 }) {
   const searchParams = await searchParamsPromise;
   const supabase = await createClient();
@@ -30,7 +31,7 @@ export default async function ContentCatalog({
 
   let dbQuery = supabase
     .from('contents')
-    .select('id, title, tmdb_id, type, status, created_at, cast_data', { count: 'exact' });
+    .select('id, title, tmdb_id, type, status, platform, created_at, cast_data', { count: 'exact' });
 
   if (query) {
     dbQuery = dbQuery.ilike('title', `%${query}%`);
@@ -40,6 +41,9 @@ export default async function ContentCatalog({
   }
   if (statusFilter) {
     dbQuery = dbQuery.eq('status', statusFilter);
+  }
+  if (searchParams.platform) {
+    dbQuery = dbQuery.eq('platform', searchParams.platform);
   }
 
   const { data: contents, count } = await dbQuery
@@ -73,7 +77,7 @@ export default async function ContentCatalog({
               <tr className="bg-white/5 border-b border-white/5">
                 <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Konten</th>
                 <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Tipe</th>
-                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Status</th>
+                <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Platform</th>
                 <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">TMDb ID</th>
                 <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest">Ditambahkan</th>
                 <th className="p-6 text-zinc-500 text-xs font-black uppercase tracking-widest text-right">Aksi</th>
@@ -103,6 +107,22 @@ export default async function ContentCatalog({
                       <div className={`w-2 h-2 rounded-full ${item.status === 'approved' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-yellow-500'}`} />
                       <span className="text-sm font-bold text-zinc-300">{item.status === 'approved' ? 'Active' : 'Pending'}</span>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    {item.platform && item.platform !== 'other' ? (
+                      <span 
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border"
+                        style={{ 
+                          backgroundColor: `${NETWORK_CONFIGS.find(n => n.slug === item.platform)?.color}15`,
+                          color: NETWORK_CONFIGS.find(n => n.slug === item.platform)?.color,
+                          borderColor: `${NETWORK_CONFIGS.find(n => n.slug === item.platform)?.color}30`
+                        }}
+                      >
+                        {item.platform}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest italic">None</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 font-mono text-xs text-zinc-500">
                     <span className="bg-white/5 px-2 py-1 rounded border border-white/5">{item.tmdb_id}</span>

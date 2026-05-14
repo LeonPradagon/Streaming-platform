@@ -2,6 +2,7 @@
 
 import { Search, Filter } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { NETWORK_CONFIGS } from '@/lib/tmdb';
 
 export default function CatalogFilters({ query, type, status }: { query: string; type: string; status: string }) {
   const router = useRouter();
@@ -70,6 +71,18 @@ export default function CatalogFilters({ query, type, status }: { query: string;
         <option value="">Semua Status</option>
         <option value="approved">Approved</option>
         <option value="pending">Pending</option>
+      </select>
+
+      <select 
+        style={{ padding: '0.75rem 1.5rem', backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.75rem', color: 'white' }}
+        onChange={(e) => updateSearch('platform', e.target.value)}
+        defaultValue={searchParams.get('platform') || ''}
+      >
+        <option value="">Semua Platform</option>
+        {NETWORK_CONFIGS.map(net => (
+          <option key={net.slug} value={net.slug}>{net.name}</option>
+        ))}
+        <option value="other">Other / Unclassified</option>
       </select>
     </div>
   );

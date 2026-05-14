@@ -6,6 +6,7 @@ import {
   classifyPlatform,
   PLATFORM_LABELS,
   PLATFORM_COLORS,
+  NETWORK_CONFIGS,
   Platform,
 } from "@/lib/tmdb";
 import HeroCarousel from "@/components/HeroCarousel";
@@ -27,7 +28,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   // 1. Fetch content in parallel for performance
-  const [popularRes, latestRes, drakorRes, animeRes] = await Promise.all([
+  const [popularRes, latestRes, drakorRes, animeRes, ...platformResults] = await Promise.all([
     supabase
       .from("contents")
       .select("id, tmdb_id, title, type, overview, poster_path, backdrop_path, vote_average, popularity, release_date, platform, genre_names, cast_data, quality, status, tv_status")
@@ -53,8 +54,41 @@ export default async function Home() {
       .eq("status", "approved")
       .in("type", ["anime", "donghua"])
       .order("popularity", { ascending: false })
-      .limit(40)
+      .limit(40),
+    // Platform-specific fetches
+    ...NETWORK_CONFIGS.map(net =>
+      supabase
+        .from("contents")
+        .select("id, tmdb_id, title, type, overview, poster_path, backdrop_path, vote_average, popularity, release_date, platform, genre_names, cast_data, quality, status, tv_status")
+        .eq("status", "approved")
+        .eq("platform", net.slug)
+        .order("popularity", { ascending: false })
+        .limit(20)
+    )
   ]);
+
+  // Build platform groups
+  const platformGroups: Record<string, any[]> = {};
+  NETWORK_CONFIGS.forEach((net, idx) => {
+    const res = platformResults[idx];
+    platformGroups[net.slug] = (res.data || []).map((item: any) => ({
+      ...item,
+      metadata: {
+        id: item.tmdb_id,
+        title: item.title,
+        overview: item.overview || "",
+        poster_path: item.poster_path,
+        backdrop_path: item.backdrop_path,
+        vote_average: item.vote_average || 0,
+        popularity: item.popularity || 0,
+        release_date: item.release_date,
+        genres: (item.genre_names || []).map((name: string) => ({ id: 0, name })),
+        credits: { cast: item.cast_data || [] },
+        status: item.tv_status,
+      },
+      platform: item.platform || "other",
+    }));
+  });
 
   const allContent = [
     ...(popularRes.data || []),
@@ -111,6 +145,16 @@ export default async function Home() {
     if (animes[i]) mixedTrending.push(animes[i]);
   }
 
+  // Network icons based on brand
+  const networkIcons: Record<string, React.ReactNode> = {
+    netflix: <Tv size={20} className="text-red-500" />,
+    disney: <Sparkles size={20} className="text-blue-500" />,
+    amazon: <MonitorPlay size={20} className="text-cyan-500" />,
+    apple: <Globe size={20} className="text-gray-400" />,
+    hbo: <Film size={20} className="text-purple-500" />,
+    paramount: <Clapperboard size={20} className="text-blue-400" />,
+  };
+
   return (
     <div className="pb-20 relative bg-[#0a0a0a]">
       {/* Hero Section */}
@@ -163,6 +207,23 @@ export default async function Home() {
           />
         </Suspense>
 
+        {/* Platform / Network Rows */}
+        {NETWORK_CONFIGS.map(net => {
+          const items = platformGroups[net.slug];
+          if (!items || items.length < 4) return null;
+          return (
+            <Suspense key={net.slug} fallback={<RowSkeleton title={net.name} />}>
+              <ContentRow
+                title={net.name}
+                items={items}
+                icon={networkIcons[net.slug] || <Tv size={20} />}
+                platformColor={net.color}
+                viewAllHref={`/network/${net.slug}`}
+              />
+            </Suspense>
+          );
+        })}
+
         {/* Genre Based Rows */}
         {Object.entries(genreGroups).slice(0, 5).map(([genre, items]) => (
           items.length >= 4 && (
@@ -179,3 +240,4 @@ export default async function Home() {
     </div>
   );
 }
+

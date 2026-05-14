@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { TMDBMetadata, classifyPlatform, classifyContentType } from '@/lib/tmdb';
+import { TMDBMetadata, classifyPlatform, classifyContentType, fetchTMDBMetadata } from '@/lib/tmdb';
 import { SubtitleService } from '@/services/SubtitleService';
 
 // Configuration
@@ -339,22 +339,352 @@ export class ScraperService {
    * Netflix Priority Discovery Task
    */
   public async runNetflixDiscovery(pagesPerType: number = 3): Promise<ScrapeTaskSummary> {
-    const taskName = 'Netflix Priority Discovery';
+    return this.runNetworkDiscovery('netflix', pagesPerType);
+  }
+
+  /**
+   * Universal Network Discovery Task — works for any platform
+   */
+  public async runNetworkDiscovery(networkSlug: string, pagesPerType: number = 3): Promise<ScrapeTaskSummary> {
+    const NETWORK_DISCOVERY_CONFIG: Record<string, { name: string; tvNetworkIds: number[]; movieProviderIds: number[]; watchRegions: string[] }> = {
+      netflix: {
+        name: 'Netflix',
+        tvNetworkIds: [213],
+        movieProviderIds: [8],
+        watchRegions: ['US', 'ID', 'KR', 'JP', 'GB']
+      },
+      disney: {
+        name: 'Disney+',
+        tvNetworkIds: [2739, 3353],
+        movieProviderIds: [337, 390],
+        watchRegions: ['US', 'ID', 'GB', 'KR']
+      },
+      hbo: {
+        name: 'HBO / Max',
+        tvNetworkIds: [49, 3186, 2832],
+        movieProviderIds: [384, 1899],
+        watchRegions: ['US', 'GB']
+      },
+      amazon: {
+        name: 'Prime Video',
+        tvNetworkIds: [1024, 4353],
+        movieProviderIds: [9, 119, 10],
+        watchRegions: ['US', 'ID', 'GB', 'JP']
+      },
+      apple: {
+        name: 'Apple TV+',
+        tvNetworkIds: [2552],
+        movieProviderIds: [350, 2],
+        watchRegions: ['US', 'GB']
+      },
+      paramount: {
+        name: 'Paramount+',
+        tvNetworkIds: [4330, 2076],
+        movieProviderIds: [531, 37],
+        watchRegions: ['US', 'GB']
+      }
+    };
+
+    const config = NETWORK_DISCOVERY_CONFIG[networkSlug];
+    if (!config) {
+      return { items_processed: 0, items_added: 0, items_failed: 0, errors: [`Unknown network: ${networkSlug}`] };
+    }
+
+    const taskName = `${config.name} Discovery`;
     const logId = await this.createLog(taskName);
     if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
     
     const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
     
     try {
-      await this.executeNetflixDiscovery(pagesPerType, logId, summary);
+      await this.executeNetworkDiscovery(config, pagesPerType, logId, summary);
       if (logId) await this.updateLog(logId, 'success', summary);
     } catch (err: any) {
-      console.error("Netflix Discovery error:", err);
+      console.error(`${config.name} Discovery error:`, err);
       if (err.message === 'Task Aborted') return summary; 
       if (logId) await this.updateLog(logId, 'failed', summary, err.message);
     }
 
     return summary;
+  }
+
+  private async executeNetworkDiscovery(
+    config: { name: string; tvNetworkIds: number[]; movieProviderIds: number[]; watchRegions: string[] },
+    pagesPerType: number,
+    logId: string,
+    summary: ScrapeTaskSummary
+  ) {
+    const scraperConfig = await this.getScraperConfig();
+    
+    // Build tasks: TV by network IDs + Movies by watch provider IDs (multi-region)
+    const tasks: Array<{ type: string; url: string; label: string }> = [];
+    
+    // TV Series tasks (by network ID)
+    for (const networkId of config.tvNetworkIds) {
+      tasks.push({
+        type: 'tv',
+        url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${networkId}&sort_by=popularity.desc`,
+        label: `${config.name} TV (Network ${networkId})`
+      });
+    }
+
+    // Movie tasks (by watch provider, multi-region for broader coverage)
+    for (const providerId of config.movieProviderIds) {
+      for (const region of config.watchRegions.slice(0, 2)) { // Limit to 2 regions to stay within time
+        tasks.push({
+          type: 'movie',
+          url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc`,
+          label: `${config.name} Movie (Provider ${providerId}, ${region})`
+        });
+      }
+    }
+
+    for (const task of tasks) {
+      for (let page = 1; page <= pagesPerType; page++) {
+        await this.checkTaskActive(logId);
+        console.log(`[Scraper] ${task.label} | Page ${page}`);
+        
+        const res = await this.fetchWithTimeout(`${task.url}&page=${page}`);
+        const data = await res.json();
+
+        if (data.results && data.results.length > 0) {
+          await this.pMap(data.results, async (item: any) => {
+            summary.items_processed++;
+            if (logId) {
+              const totalEstimated = tasks.length * pagesPerType * 20;
+              await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || `Scanning ${config.name}...`);
+            }
+
+            try {
+              const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig);
+              if (saved) summary.items_added++;
+            } catch {
+              summary.items_failed++;
+            }
+          }, 3, () => this.checkTaskActive(logId));
+        }
+      }
+    }
+  }
+
+  /**
+   * Discover content for ALL networks
+   */
+  public async runAllNetworksDiscovery(pagesPerNetwork: number = 2): Promise<ScrapeTaskSummary[]> {
+    const networks = ['netflix', 'disney', 'hbo', 'amazon', 'apple', 'paramount'];
+    const results: ScrapeTaskSummary[] = [];
+    for (const net of networks) {
+      const result = await this.runNetworkDiscovery(net, pagesPerNetwork);
+      results.push(result);
+    }
+    return results;
+  }
+
+  /**
+   * Re-classify existing content based on new/expanded network IDs
+   */
+  public async runReclassifyContent(limit = 100): Promise<ScrapeTaskSummary> {
+    const taskName = 'Platform Re-classification';
+    const logId = await this.createLog(taskName);
+    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+
+    try {
+      const { data: contents } = await supabase
+        .from('contents')
+        .select('id, tmdb_id, type, title, platform')
+        .or('platform.eq.other,platform.is.null')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (!contents || contents.length === 0) {
+        if (logId) await this.updateLog(logId, 'success', summary);
+        return summary;
+      }
+
+      await this.pMap(contents, async (item: any) => {
+        summary.items_processed++;
+        if (logId) {
+          await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title || `ID: ${item.tmdb_id}`);
+        }
+
+        try {
+          const tmdbBaseType = (item.type === 'movie') ? 'movie' : 'tv';
+          const metadata = await fetchTMDBMetadata(item.tmdb_id, tmdbBaseType);
+          if (!metadata) {
+             // If not found, mark as other to avoid repeating
+             await supabase.from('contents').update({ platform: 'other' }).eq('id', item.id);
+             return;
+          }
+
+          const newPlatform = classifyPlatform(metadata, item.type);
+          
+          if (newPlatform !== item.platform) {
+            await supabase
+              .from('contents')
+              .update({ platform: newPlatform })
+              .eq('id', item.id);
+            summary.items_added++;
+          }
+        } catch (err: any) {
+          summary.items_failed++;
+          summary.errors.push(`${item.title}: ${err.message}`);
+        }
+      }, 5, () => this.checkTaskActive(logId));
+
+      if (logId) await this.updateLog(logId, 'success', summary);
+    } catch (err: any) {
+      if (err.message === 'Task Aborted') return summary;
+      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+    }
+
+    return summary;
+  }
+
+  /**
+   * Chunked Re-classification for Serverless
+   */
+  public async runReclassifyContentChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const offset = (state.offset as number) || 0;
+    const chunkSize = 10;
+    
+    let { data: contents } = await supabase
+      .from('contents')
+      .select('id, tmdb_id, type, title, platform')
+      .or('platform.eq.other,platform.is.null')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + chunkSize - 1);
+
+    if (!contents || contents.length === 0) {
+      return { summary, hasMore: false, nextState: {} };
+    }
+
+    for (const item of contents) {
+      if (this.isChunkTimedOut()) break;
+      summary.items_processed++;
+      
+      if (state.logId) {
+        await this.updateLogProgress(state.logId as string, (state.accumulatedProcessed as number || 0) + summary.items_processed, 100, item.title);
+      }
+
+      try {
+        const tmdbBaseType = (item.type === 'movie') ? 'movie' : 'tv';
+        const metadata = await fetchTMDBMetadata(item.tmdb_id, tmdbBaseType);
+        if (metadata) {
+          const newPlatform = classifyPlatform(metadata, item.type);
+          if (newPlatform !== item.platform) {
+            await supabase.from('contents').update({ platform: newPlatform }).eq('id', item.id);
+            summary.items_added++;
+          }
+        }
+      } catch {
+        summary.items_failed++;
+      }
+    }
+
+    const actualProcessed = summary.items_processed;
+    const nextOffset = offset + actualProcessed;
+    const hasMore = contents.length >= chunkSize;
+    
+    return { 
+      summary, 
+      hasMore, 
+      nextState: hasMore ? { 
+        logId: state.logId, 
+        offset: nextOffset,
+        accumulatedProcessed: (state.accumulatedProcessed as number || 0) + actualProcessed 
+      } : {} 
+    };
+  }
+
+  /**
+   * Chunked Network Discovery for Serverless (Vercel)
+   */
+  public async runNetworkDiscoveryChunk(networkSlug: string, pagesPerType: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+    this.chunkStartTime = Date.now();
+    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const scraperConfig = await this.getScraperConfig();
+
+    const NETWORK_TV_IDS: Record<string, number[]> = {
+      netflix: [213], disney: [2739, 3353], hbo: [49, 3186, 2832],
+      amazon: [1024, 4353], apple: [2552], paramount: [4330, 2076]
+    };
+    const NETWORK_MOVIE_PROVIDERS: Record<string, number[]> = {
+      netflix: [8], disney: [337], hbo: [384], amazon: [9], apple: [350], paramount: [531]
+    };
+
+    let allTasks = state.tasks as Array<{ type: string; url: string }> | undefined;
+    if (!allTasks) {
+      allTasks = [];
+      for (const nid of (NETWORK_TV_IDS[networkSlug] || [])) {
+        allTasks.push({ type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${nid}&sort_by=popularity.desc` });
+      }
+      for (const pid of (NETWORK_MOVIE_PROVIDERS[networkSlug] || [])) {
+        allTasks.push({ type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${pid}&watch_region=US&sort_by=popularity.desc` });
+      }
+    }
+
+    let currentTaskIndex = (state.currentTaskIndex as number) || 0;
+    let currentPage = (state.currentPage as number) || 1;
+    let currentItemIndex = (state.currentItemIndex as number) || 0;
+
+    if (currentTaskIndex >= allTasks.length) {
+      return { summary, hasMore: false, total: 0, nextState: {} };
+    }
+
+    const task = allTasks[currentTaskIndex];
+    const res = await this.fetchWithTimeout(`${task.url}&page=${currentPage}`);
+    const data = await res.json();
+
+    if (data.results && data.results.length > 0) {
+      const CHUNK_SIZE = 3;
+      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
+      
+      const tmdbIds = resultsToProcess.map((i: any) => i.id);
+      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
+      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+
+      for (const item of resultsToProcess) {
+        if (this.isChunkTimedOut()) break;
+        summary.items_processed++;
+        if (state.logId) {
+          const totalEstimated = allTasks.length * pagesPerType * 20;
+          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
+          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || `Scanning ${networkSlug}...`);
+        }
+        if (existingIds.has(item.id) && task.type === 'movie') continue;
+        try {
+          const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig, { skipDeepScrapeTV: true });
+          if (saved) summary.items_added++;
+        } catch {
+          summary.items_failed++;
+        }
+      }
+    }
+
+    const actualProcessed = summary.items_processed;
+    let nextItemIndex = currentItemIndex + actualProcessed;
+    if (nextItemIndex >= (data.results?.length || 0)) {
+      nextItemIndex = 0;
+      currentPage++;
+      if (currentPage > pagesPerType || !data.results || data.results.length === 0) {
+        currentTaskIndex++;
+        currentPage = 1;
+      }
+    }
+
+    const hasMore = currentTaskIndex < allTasks.length;
+    const total = allTasks.length * pagesPerType * 20;
+
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { tasks: allTasks, currentTaskIndex, currentPage, currentItemIndex: nextItemIndex } : {}
+    };
   }
 
   private async executeNetflixDiscovery(pagesPerType: number, logId: string, summary: ScrapeTaskSummary) {
@@ -552,14 +882,14 @@ export class ScraperService {
   }
 
   /**
-   * Full Daily Routine: Netflix + Trending + Genre Discovery
+   * Full Daily Routine: All Networks + Trending + Genre Discovery
    */
   public async runFullRoutine(pages: number = 5): Promise<ScrapeTaskSummary[]> {
     console.log(`🚀 Starting Full Scraper Routine (Intensity: ${pages} pages)...`);
-    const netflix = await this.runNetflixDiscovery(pages);
+    const networkResults = await this.runAllNetworksDiscovery(Math.min(pages, 2)); // 2 pages per network to manage API limits
     const trending = await this.runTrendingDiscovery();
     const discovery = await this.runDiscovery(pages);
-    return [netflix, trending, discovery];
+    return [...networkResults, trending, discovery];
   }
 
   /**

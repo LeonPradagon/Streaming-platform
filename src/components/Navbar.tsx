@@ -4,11 +4,12 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   Search, User, Menu, X, Play, Flame, Compass, 
-  Library, ChevronDown, Globe, Film, Star, LogOut, Settings 
+  Library, ChevronDown, Globe, Film, Star, LogOut, Settings, Tv, Radio
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
+import { NETWORK_CONFIGS } from "@/lib/tmdb";
 
 const GENRES = [
   { label: "Aksi", value: "Action" },
@@ -162,6 +163,61 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Network Dropdown */}
+            <div className="relative" onMouseLeave={() => setActiveDropdown(null)}>
+              <button
+                onMouseEnter={() => setActiveDropdown("network")}
+                className={`px-4 py-2 text-[13px] font-black uppercase tracking-wider flex items-center gap-1 transition-all ${
+                  pathname.startsWith("/network") ? "text-white" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Network <ChevronDown size={14} className={`transition-transform duration-300 ${activeDropdown === "network" ? "rotate-180" : ""}`} />
+              </button>
+              <AnimatePresence>
+                {activeDropdown === "network" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-full -left-20 w-[420px] pt-3 z-50 pointer-events-auto"
+                  >
+                    <div className="bg-black/90 backdrop-blur-3xl border border-white/10 rounded-3xl shadow-2xl p-4 space-y-1">
+                      {NETWORK_CONFIGS.map(net => (
+                        <Link
+                          key={net.slug}
+                          href={`/network/${net.slug}`}
+                          className="flex items-center gap-4 px-4 py-3.5 rounded-2xl hover:bg-white/5 transition-all group/net"
+                          onClick={() => setActiveDropdown(null)}
+                        >
+                          {/* Brand color indicator */}
+                          <div 
+                            className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-sm shrink-0 shadow-lg transition-transform group-hover/net:scale-110"
+                            style={{ backgroundColor: net.color, boxShadow: `0 0 20px ${net.color}40` }}
+                          >
+                            {net.name.charAt(0)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] font-black text-white uppercase tracking-wide">{net.name}</div>
+                            <div className="text-[10px] text-gray-500 font-medium truncate">{net.description}</div>
+                          </div>
+                          <ChevronDown size={14} className="text-gray-600 -rotate-90 group-hover/net:text-white transition-colors shrink-0" />
+                        </Link>
+                      ))}
+                      <div className="border-t border-white/5 pt-2 mt-2">
+                        <Link
+                          href="/network"
+                          className="flex items-center justify-center gap-2 px-4 py-3 text-[11px] font-black text-gray-500 hover:text-white uppercase tracking-widest transition-all hover:bg-white/5 rounded-xl"
+                          onClick={() => setActiveDropdown(null)}
+                        >
+                          <Radio size={12} /> Lihat Semua Network
+                        </Link>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* Action Icons */}
@@ -236,7 +292,7 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed inset-0 z-[95] bg-black md:hidden flex flex-col pt-32 px-8 gap-4"
+            className="fixed inset-0 z-[95] bg-black md:hidden flex flex-col pt-32 px-8 gap-4 overflow-y-auto pb-32"
           >
             {navLinks.map((link) => (
               <Link
@@ -252,6 +308,30 @@ export default function Navbar({ brandName = "NETIX" }: { brandName?: string }) 
               </Link>
             ))}
 
+            {/* Network Section - Mobile */}
+            <div className="mt-6">
+              <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-4 ml-2">Network</h4>
+              <div className="grid grid-cols-2 gap-2">
+                {NETWORK_CONFIGS.map(net => (
+                  <Link
+                    key={net.slug}
+                    href={`/network/${net.slug}`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-3 p-4 bg-white/5 border border-white/5 rounded-2xl active:scale-95 transition-all"
+                  >
+                    <div 
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0"
+                      style={{ backgroundColor: net.color }}
+                    >
+                      {net.name.charAt(0)}
+                    </div>
+                    <span className="text-[11px] font-black uppercase text-gray-300 tracking-wide truncate">{net.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {/* Genres Section - Mobile */}
             <div className="mt-6">
               <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-4 ml-2">Pilih Genre</h4>
               <div className="grid grid-cols-2 gap-2 overflow-y-auto max-h-[30vh] pr-2 custom-scrollbar">

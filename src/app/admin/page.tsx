@@ -1,23 +1,35 @@
 import { createClient } from '@/lib/supabase/server';
+import { NETWORK_CONFIGS } from '@/lib/tmdb';
 import { 
   BarChart3, 
   Users, 
   Film, 
   Activity,
   ArrowUpRight,
-  Clock
+  Clock,
+  Tv,
+  Radio,
+  TrendingUp,
+  AlertTriangle
 } from 'lucide-react';
+import Link from 'next/link';
 
 export default async function AdminOverview() {
   const supabase = await createClient();
 
-  // ⚡ PERFORMANCE: All stat queries in parallel (was 5 serial round-trips)
-  const [usersResult, contentResult, pendingResult, trafficResult, logsResult] = await Promise.all([
+  // ⚡ PERFORMANCE: All stat queries in parallel
+  const [usersResult, contentResult, pendingResult, trafficResult, logsResult, ...platformResults] = await Promise.all([
     supabase.from('profiles').select('*', { count: 'exact', head: true }),
     supabase.from('contents').select('*', { count: 'exact', head: true }),
     supabase.from('contents').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
     supabase.from('watch_history').select('*', { count: 'exact', head: true }).gte('updated_at', new Date(new Date().setHours(0,0,0,0)).toISOString()),
     supabase.from('audit_logs').select('*, profiles(full_name)').order('created_at', { ascending: false }).limit(5),
+    // Platform counts
+    ...NETWORK_CONFIGS.map(net =>
+      supabase.from('contents').select('*', { count: 'exact', head: true }).eq('platform', net.slug).eq('status', 'approved')
+    ),
+    // "other" / unclassified count
+    supabase.from('contents').select('*', { count: 'exact', head: true }).eq('platform', 'other').eq('status', 'approved'),
   ]);
 
   const usersCount = usersResult.count;
@@ -25,6 +37,16 @@ export default async function AdminOverview() {
   const pendingCount = pendingResult.count;
   const trafficCount = trafficResult.count;
   const recentLogs = logsResult.data;
+
+  // Build platform stats
+  const platformStats = NETWORK_CONFIGS.map((net, idx) => ({
+    ...net,
+    count: platformResults[idx]?.count || 0,
+  }));
+  const otherCount = platformResults[NETWORK_CONFIGS.length]?.count || 0;
+  const totalClassified = platformStats.reduce((sum, p) => sum + p.count, 0);
+  const totalApproved = totalClassified + otherCount;
+  const classificationRate = totalApproved > 0 ? Math.round((totalClassified / totalApproved) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -58,13 +80,109 @@ export default async function AdminOverview() {
         />
       </div>
 
+      {/* Network Distribution Widget */}
+      <section className="glass p-8 rounded-3xl border border-white/5">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/5">
+              <Radio size={20} className="text-red-500" />
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-white tracking-tight">Distribusi Network</h3>
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Platform content breakdown</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            {/* Classification Rate */}
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${
+              classificationRate >= 80 
+                ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                : classificationRate >= 50 
+                  ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                  : 'bg-red-500/10 text-red-500 border-red-500/20'
+            }`}>
+              <TrendingUp size={14} />
+              {classificationRate}% Terklasifikasi
+            </div>
+            <Link 
+              href="/admin/networks"
+              className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-zinc-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-widest"
+            >
+              Kelola Network →
+            </Link>
+          </div>
+        </div>
+
+        {/* Platform Bars */}
+        <div className="space-y-4">
+          {platformStats.map(p => {
+            const percentage = totalApproved > 0 ? (p.count / totalApproved) * 100 : 0;
+            return (
+              <div key={p.slug} className="group">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0"
+                      style={{ backgroundColor: p.color }}
+                    >
+                      {p.name.charAt(0)}
+                    </div>
+                    <span className="text-sm font-bold text-zinc-300 group-hover:text-white transition-colors">{p.name}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-black tabular-nums" style={{ color: p.color }}>{p.count}</span>
+                    <span className="text-[10px] font-bold text-zinc-600 tabular-nums w-12 text-right">{percentage.toFixed(1)}%</span>
+                  </div>
+                </div>
+                <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full rounded-full transition-all duration-700 group-hover:opacity-100 opacity-80"
+                    style={{ 
+                      width: `${Math.max(percentage, 0.5)}%`, 
+                      backgroundColor: p.color,
+                      boxShadow: `0 0 12px ${p.color}40`
+                    }} 
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Unclassified */}
+          {otherCount > 0 && (
+            <div className="group mt-2 pt-4 border-t border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-zinc-700 text-white font-black text-xs shrink-0">
+                    <AlertTriangle size={14} />
+                  </div>
+                  <span className="text-sm font-bold text-zinc-500">Belum Terklasifikasi</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-black text-zinc-500 tabular-nums">{otherCount}</span>
+                  <span className="text-[10px] font-bold text-zinc-600 tabular-nums w-12 text-right">
+                    {totalApproved > 0 ? ((otherCount / totalApproved) * 100).toFixed(1) : 0}%
+                  </span>
+                </div>
+              </div>
+              <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                <div 
+                  className="h-full rounded-full bg-zinc-600"
+                  style={{ width: `${totalApproved > 0 ? Math.max((otherCount / totalApproved) * 100, 0.5) : 0}%` }} 
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Recent Activity (Audit Logs) Preview */}
         <section className="glass p-8 rounded-3xl lg:col-span-2">
           <div className="flex justify-between items-center mb-8">
             <h3 className="text-xl font-black text-white">Aktivitas Admin Terbaru</h3>
-            <button className="text-yellow-500 font-bold text-sm hover:underline">Lihat Semua</button>
+            <Link href="/admin/audit" className="text-yellow-500 font-bold text-sm hover:underline">Lihat Semua</Link>
           </div>
           <div className="flex flex-col gap-4">
             {recentLogs?.map((log) => (
@@ -98,14 +216,29 @@ export default async function AdminOverview() {
             </div>
           </div>
           
+          {/* Quick Network Stats */}
           <div className="glass p-8 rounded-3xl">
-            <h4 className="text-white font-black text-sm mb-6">Admin Teratas</h4>
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-white">AD</div>
-                <div className="text-sm font-bold text-zinc-300">Administrator</div>
-                <div className="ml-auto text-emerald-500 text-xs font-bold bg-emerald-500/10 px-2 py-1 rounded-lg">45 actions</div>
-              </div>
+            <h4 className="text-white font-black text-sm mb-6 flex items-center gap-2">
+              <Tv size={16} className="text-red-500" /> Top Networks
+            </h4>
+            <div className="flex flex-col gap-3">
+              {platformStats
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 4)
+                .map(p => (
+                  <div key={p.slug} className="flex items-center gap-3">
+                    <div 
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-black text-[10px] shrink-0"
+                      style={{ backgroundColor: p.color }}
+                    >
+                      {p.name.charAt(0)}
+                    </div>
+                    <div className="text-sm font-bold text-zinc-400 flex-1">{p.name}</div>
+                    <div className="text-xs font-black px-2 py-1 rounded-lg" style={{ color: p.color, backgroundColor: `${p.color}15` }}>
+                      {p.count}
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         </div>

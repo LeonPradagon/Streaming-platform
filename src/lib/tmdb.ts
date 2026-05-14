@@ -61,6 +61,7 @@ export const fetchTMDBMetadata = async (id: number, type: 'movie' | 'tv'): Promi
     const response = await fetch(`${TMDB_BASE_URL}/${type}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`, { next: { revalidate: 3600 } });
     
     if (!response.ok) {
+      if (response.status === 404) return null;
       throw new Error(`TMDB API Error: ${response.statusText}`);
     }
 
@@ -98,25 +99,34 @@ export const getTMDBImageUrl = (path: string, size: 'w185' | 'w342' | 'w500' | '
 
 export type Platform = 'netflix' | 'disney' | 'amazon' | 'apple' | 'hbo' | 'paramount' | 'anime' | 'other';
 
-// TMDB Network IDs
-// TMDB IDs Constants
+// TMDB Network IDs — Expanded for comprehensive platform classification
 export const TMDB_NETWORKS = {
-  NETFLIX: [213],
-  DISNEY: [2739, 3353],
-  AMAZON: [1024, 4353],
-  APPLE: [2552],
-  HBO: [49, 3186, 2832],
-  PARAMOUNT: [4330, 2076],
-  ANIME: [614, 98, 210, 1112, 269, 174, 100, 1376, 171, 167, 68, 530, 2064]
+  NETFLIX: [213, 49, 2552, 3749], // Netflix, Netflix Kids
+  DISNEY: [2739, 3353, 2, 54, 6125, 3475], // Disney+, Disney Channel, Hotstar
+  AMAZON: [1024, 4353, 4354, 2697], // Amazon Prime Video, Freevee, MGM+
+  APPLE: [2552, 3750], // Apple TV+
+  HBO: [49, 3186, 2832, 453, 3306, 1709], // HBO, HBO Max, Max, Cinemax
+  PARAMOUNT: [4330, 2076, 16, 4353, 1023, 43], // Paramount+, CBS, Showtime
+  ANIME: [614, 98, 210, 1112, 269, 174, 100, 1376, 171, 167, 68, 530, 2064, 1430, 2750, 3619, 287, 1341, 366, 2534, 173]
 };
 
 export const TMDB_COMPANIES = {
-  NETFLIX: [213534, 157436],
-  DISNEY: [2, 3166, 6125, 420, 16211],
-  AMAZON: [9353, 20580],
-  APPLE: [164461, 138382],
-  HBO: [3268, 174652, 12, 76043],
-  PARAMOUNT: [4, 21]
+  NETFLIX: [213534, 157436, 145174, 15231, 211346, 132628, 186116, 175281],
+  DISNEY: [2, 3166, 6125, 420, 16211, 3, 25, 11461, 176762, 184228, 1382, 7505],
+  AMAZON: [9353, 20580, 7429, 246660, 10817, 138381, 21, 2440],
+  APPLE: [164461, 138382, 140042, 137787, 126860],
+  HBO: [3268, 174652, 12, 76043, 3267, 5820, 125581, 157627],
+  PARAMOUNT: [4, 21, 882, 11, 5, 122951, 7493, 25841]
+};
+
+// Watch Provider IDs (JustWatch / TMDB) for additional matching
+export const TMDB_WATCH_PROVIDERS = {
+  NETFLIX: [8],
+  DISNEY: [337, 390],
+  AMAZON: [9, 119, 10],
+  APPLE: [350, 2],
+  HBO: [384, 1899],
+  PARAMOUNT: [531, 37]
 };
 
 /**
@@ -206,3 +216,13 @@ export const PLATFORM_COLORS: Record<Platform, string> = {
   anime: '#FF6740',
   other: '#888888',
 };
+
+/** Network configurations for UI display */
+export const NETWORK_CONFIGS = [
+  { slug: 'netflix', name: 'Netflix', color: '#E50914', bgGradient: 'from-red-900/80 to-black', description: 'Film & Series Original dari Netflix' },
+  { slug: 'disney', name: 'Disney+', color: '#113CCF', bgGradient: 'from-blue-900/80 to-black', description: 'Konten Eksklusif Disney, Marvel, Star Wars & Pixar' },
+  { slug: 'amazon', name: 'Prime Video', color: '#00A8E1', bgGradient: 'from-cyan-900/80 to-black', description: 'Amazon Original Series & Film' },
+  { slug: 'apple', name: 'Apple TV+', color: '#A3AAAE', bgGradient: 'from-gray-700/80 to-black', description: 'Premium Original Content dari Apple' },
+  { slug: 'hbo', name: 'HBO / Max', color: '#B01CD2', bgGradient: 'from-purple-900/80 to-black', description: 'HBO Original, Warner Bros & DC Universe' },
+  { slug: 'paramount', name: 'Paramount+', color: '#0064FF', bgGradient: 'from-blue-800/80 to-black', description: 'Showtime, CBS & Paramount Original' },
+] as const;

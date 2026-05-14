@@ -12,6 +12,7 @@ interface BrowseFiltersProps {
   currentGenre?: string;
   currentCountry?: string;
   currentYear?: string;
+  currentPlatform?: string;
 }
 
 const TYPES = [
@@ -48,7 +49,17 @@ const COUNTRIES = [
 
 const YEARS = ['all', ...Array.from({ length: 12 }, (_, i) => String(new Date().getFullYear() - i))];
 
-export default function BrowseFilters({ currentQ, currentType, currentSort, currentView, currentGenre, currentCountry, currentYear }: BrowseFiltersProps) {
+const PLATFORMS = [
+  { value: 'all', label: 'Semua', color: '#888' },
+  { value: 'netflix', label: 'Netflix', color: '#E50914' },
+  { value: 'disney', label: 'Disney+', color: '#113CCF' },
+  { value: 'amazon', label: 'Prime Video', color: '#00A8E1' },
+  { value: 'apple', label: 'Apple TV+', color: '#A3AAAE' },
+  { value: 'hbo', label: 'HBO / Max', color: '#B01CD2' },
+  { value: 'paramount', label: 'Paramount+', color: '#0064FF' },
+];
+
+export default function BrowseFilters({ currentQ, currentType, currentSort, currentView, currentGenre, currentCountry, currentYear, currentPlatform }: BrowseFiltersProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(currentQ);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -64,6 +75,7 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
       view: currentView,
       country: currentCountry,
       year: currentYear,
+      platform: currentPlatform,
       ...params,
     };
     Object.entries(allParams).forEach(([key, value]) => {
@@ -208,6 +220,27 @@ export default function BrowseFilters({ currentQ, currentType, currentSort, curr
                     }`}
                   >
                     {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Platform Filter */}
+            <div className="lg:col-span-2">
+              <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.4em] mb-4 block">Network / Platform</label>
+              <div className="flex flex-wrap gap-2">
+                {PLATFORMS.map(p => (
+                  <button
+                    key={p.value}
+                    onClick={() => router.push(buildUrl({ platform: p.value }))}
+                    className={`px-5 py-2 rounded-xl text-[12px] font-bold border transition-all ${(
+                      (currentPlatform || 'all') === p.value
+                        ? 'text-white shadow-lg'
+                        : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    )}`}
+                    style={(currentPlatform || 'all') === p.value ? { backgroundColor: p.color, borderColor: p.color, boxShadow: `0 0 20px ${p.color}30` } : {}}
+                  >
+                    {p.label}
                   </button>
                 ))}
               </div>

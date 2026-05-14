@@ -15,6 +15,7 @@ import {
   Activity,
   AlertTriangle,
   Menu,
+  Tv,
   X
 } from "lucide-react";
 import { logout } from "@/app/auth/actions";
@@ -32,6 +33,7 @@ export default function AdminSidebar({ user, brandName }: SidebarProps) {
     { href: "/admin", icon: <BarChart3 size={20} />, label: "Overview" },
     { href: "/admin/approve", icon: <CheckCircle2 size={20} />, label: "Persetujuan Film" },
     { href: "/admin/catalog", icon: <Film size={20} />, label: "Katalog Konten" },
+    { href: "/admin/networks", icon: <Tv size={20} />, label: "Manajemen Network" },
     { href: "/admin/users", icon: <Users size={20} />, label: "Manajemen User" },
     { href: "/admin/audit", icon: <History size={20} />, label: "Log Audit" },
     { href: "/admin/scraper", icon: <Activity size={20} />, label: "Scraper Control" },

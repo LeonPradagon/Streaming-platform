@@ -107,6 +107,20 @@ export default function ScraperAdmin() {
     };
   }, []);
 
+  // Handle URL params (e.g. ?task=reclassify)
+  useEffect(() => {
+    const task = new URLSearchParams(window.location.search).get('task');
+    if (task && !isLoading) {
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        runTask(task);
+        // Clear param without reload
+        window.history.replaceState({}, '', window.location.pathname);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
   const runTask = async (taskType: string) => {
     if (isLoading) return;
     
@@ -259,6 +273,73 @@ export default function ScraperAdmin() {
           </motion.div>
         ))}
       </div>
+
+      {/* Network Discovery Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+        className="space-y-6"
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-black text-white tracking-tight uppercase">Network <span className="text-[#eab308]">Discovery</span></h3>
+          <button
+            onClick={() => runTask('reclassify')}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> Re-classify All Content
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[
+            { slug: 'netflix', name: 'Netflix', color: '#E50914' },
+            { slug: 'disney', name: 'Disney+', color: '#113CCF' },
+            { slug: 'hbo', name: 'HBO / Max', color: '#B01CD2' },
+            { slug: 'amazon', name: 'Prime Video', color: '#00A8E1' },
+            { slug: 'apple', name: 'Apple TV+', color: '#A3AAAE' },
+            { slug: 'paramount', name: 'Paramount+', color: '#0064FF' },
+          ].map((net, idx) => {
+            const taskId = `network_${net.slug}`;
+            const isRunning = activeTask === taskId;
+            return (
+              <motion.button
+                key={net.slug}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.6 + idx * 0.08 }}
+                onClick={() => runTask(taskId)}
+                disabled={isLoading}
+                className={`relative p-6 rounded-2xl border overflow-hidden group transition-all duration-500 active:scale-95 ${
+                  isRunning 
+                    ? 'border-white/20 bg-white/5' 
+                    : 'border-white/5 bg-white/[0.02] hover:border-white/15 hover:bg-white/5'
+                }`}
+              >
+                {/* Brand glow */}
+                <div 
+                  className="absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity duration-700"
+                  style={{ background: `radial-gradient(circle at center, ${net.color}40, transparent 70%)` }}
+                />
+                <div className="relative z-10 flex flex-col items-center gap-3">
+                  <div 
+                    className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-lg transition-transform group-hover:scale-110"
+                    style={{ 
+                      backgroundColor: net.color,
+                      boxShadow: isRunning ? `0 0 30px ${net.color}50` : `0 0 15px ${net.color}20`
+                    }}
+                  >
+                    {isRunning ? <RefreshCw className="animate-spin" size={18} /> : net.name.charAt(0)}
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 group-hover:text-white transition-colors">
+                    {net.name}
+                  </span>
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+      </motion.div>
 
       {/* Glowing Progress Bar */}
       <AnimatePresence>
