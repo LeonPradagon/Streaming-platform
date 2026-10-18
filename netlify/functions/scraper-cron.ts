@@ -1,4 +1,3 @@
-import { schedule } from '@netlify/functions';
 import { ScraperService } from '../../src/services/ScraperService';
 
 /**

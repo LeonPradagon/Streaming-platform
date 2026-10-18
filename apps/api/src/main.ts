@@ -8,11 +8,11 @@ import { db } from "./db/database";
 import { settings } from "./db/schema";
 import { eq } from "drizzle-orm";
 
-async function bootstrap() {
+export async function createNestApp() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix("api");
   app.enableCors({
-    origin: (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(",").map((value) => value.trim()),
+    origin: (process.env.CORS_ORIGIN ?? process.env.URL ?? "http://localhost:5173").split(",").map((value) => value.trim()),
     credentials: true,
   });
   app.use("/api/auth/sign-up/email", async (request: { method?: string }, response: { status(code: number): { json(body: unknown): void } }, next: () => void) => {
@@ -27,7 +27,10 @@ async function bootstrap() {
     }
   });
   app.use("/api/auth", toNodeHandler(auth));
-  await app.listen(Number(process.env.PORT ?? 3000), "0.0.0.0");
+  await app.init();
+  return app;
 }
 
-void bootstrap();
+if (process.env.NETLIFY !== "true") {
+  void createNestApp().then((app) => app.listen(Number(process.env.PORT ?? 3000), "0.0.0.0"));
+}

@@ -5,14 +5,14 @@ import { db } from "../db/database";
 import * as schema from "../db/schema";
 import { profiles, watchHistory, watchlist } from "../db/schema";
 
-const trustedOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
+const trustedOrigins = (process.env.CORS_ORIGIN ?? process.env.URL ?? "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
 export const auth = betterAuth({
   appName: "NETIX",
-  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  baseURL: process.env.BETTER_AUTH_URL ?? process.env.URL ?? "http://localhost:3000",
   secret: process.env.BETTER_AUTH_SECRET,
   advanced: { database: { generateId: () => crypto.randomUUID() } },
   trustedOrigins,

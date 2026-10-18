@@ -1,4 +1,5 @@
 node_modules/
+**/.netlify/
 .next/
 apps/*/dist/
 apps/*/.turbo/

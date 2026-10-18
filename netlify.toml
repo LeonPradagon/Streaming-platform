@@ -1,19 +1,32 @@
 [build]
-  command = "npm run build"
-  publish = ".next"
+  command = "npm run build --workspace=@netix/web"
+  publish = "apps/web/dist"
+  functions = "netlify/functions"
 
 [build.environment]
-  NEXT_USE_NETLIFY_EDGE = "true"
   NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
 
 [functions]
   node_bundler = "esbuild"
-  timeout = 26
-  external_node_modules = ["adm-zip"]
+  external_node_modules = [
+    "adm-zip",
+    "serverless-http",
+    "@nestjs/microservices",
+    "@nestjs/websockets",
+    "class-transformer",
+    "class-validator"
+  ]
 
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
 
 [[headers]]
   for = "/*"
