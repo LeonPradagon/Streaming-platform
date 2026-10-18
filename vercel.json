@@ -1,8 +1,11 @@
 {
-  "crons": [
+  "installCommand": "npm install",
+  "buildCommand": "npm run build --workspace=@netix/web",
+  "outputDirectory": "apps/web/dist",
+  "rewrites": [
     {
-      "path": "/api/scraper/run?secret=a0ee3dec8528465898c14a71e6d57525",
-      "schedule": "0 0 * * *"
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }

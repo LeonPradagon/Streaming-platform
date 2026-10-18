@@ -1,6 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
-import { TMDBMetadata, classifyPlatform, classifyContentType, fetchTMDBMetadata } from '@/lib/tmdb';
-import { SubtitleService } from '@/services/SubtitleService';
+import { createClient } from "@supabase/supabase-js";
+import {
+  TMDBMetadata,
+  classifyPlatform,
+  classifyContentType,
+  fetchTMDBMetadata,
+} from "@/lib/tmdb";
+import { SubtitleService } from "@/services/SubtitleService";
+import { videasyEmbedUrl } from "@/lib/videasy";
 
 // Configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -10,28 +16,42 @@ const tmdbApiKey = process.env.TMDB_API_KEY!;
 
 // Use service_role key if available (bypasses RLS for backend operations)
 if (!supabaseServiceKey) {
-  console.warn('[ScraperService] SUPABASE_SERVICE_ROLE_KEY not set. Using anon key - writes may be blocked by RLS.');
+  console.warn(
+    "[ScraperService] SUPABASE_SERVICE_ROLE_KEY not set. Using anon key - writes may be blocked by RLS.",
+  );
 }
-const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+const supabase = createClient(
+  supabaseUrl,
+  supabaseServiceKey || supabaseAnonKey,
+);
 
 export interface ScrapeTaskSummary {
   items_processed: number;
   items_added: number;
   items_failed: number;
   errors: string[];
+  items_skipped?: number;
+  subtitle_id?: number;
+  subtitle_en?: number;
+  subtitle_missing?: number;
 }
 
 export class ScraperService {
   private static instance: ScraperService;
-  
+
   private async delay(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
    * Helper to run tasks in parallel with a concurrency limit and optional abort check
    */
-  private async pMap<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency: number, abortCheck?: () => Promise<void>): Promise<R[]> {
+  private async pMap<T, R>(
+    items: T[],
+    mapper: (item: T) => Promise<R>,
+    concurrency: number,
+    abortCheck?: () => Promise<void>,
+  ): Promise<R[]> {
     const results: R[] = [];
     const chunks = [];
     for (let i = 0; i < items.length; i += concurrency) {
@@ -40,7 +60,7 @@ export class ScraperService {
 
     for (const chunk of chunks) {
       if (abortCheck) await abortCheck();
-      const chunkResults = await Promise.all(chunk.map(item => mapper(item)));
+      const chunkResults = await Promise.all(chunk.map((item) => mapper(item)));
       results.push(...chunkResults);
       // Small breathing room between chunks
       await this.delay(200);
@@ -48,34 +68,51 @@ export class ScraperService {
     return results;
   }
 
-  private async fetchWithTimeout(url: string, options: any = {}, timeout = 15000, retryCount = 0): Promise<Response> {
+  private async fetchWithTimeout(
+    url: string,
+    options: any = {},
+    timeout = 15000,
+    retryCount = 0,
+  ): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
       clearTimeout(id);
-      
+
       // Handle Rate Limiting (429) or Server Errors (5xx)
-      if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+      if (
+        response.status === 429 ||
+        (response.status >= 500 && response.status <= 599)
+      ) {
         if (retryCount >= 3) {
-          throw new Error(`External API failed with status ${response.status} after ${retryCount} retries`);
+          throw new Error(
+            `External API failed with status ${response.status} after ${retryCount} retries`,
+          );
         }
-        
-        const retryAfter = response.headers.get('Retry-After');
+
+        const retryAfter = response.headers.get("Retry-After");
         // Exponential backoff: 2s, 4s, 8s or use Retry-After header
-        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, retryCount) * 2000;
-        
-        console.warn(`[Scraper] API status ${response.status} at ${url}. Retrying in ${waitTime/1000}s...`);
+        const waitTime = retryAfter
+          ? parseInt(retryAfter) * 1000
+          : Math.pow(2, retryCount) * 2000;
+
+        console.warn(
+          `[Scraper] API status ${response.status} at ${url.split('?')[0]}. Retrying in ${waitTime / 1000}s...`,
+        );
         await this.delay(waitTime);
-        return this.fetchWithTimeout(url, options, timeout, retryCount + 1); 
+        return this.fetchWithTimeout(url, options, timeout, retryCount + 1);
       }
-      
+
       return response;
     } catch (error: any) {
       clearTimeout(id);
-      if (error.name === 'AbortError' && retryCount < 2) {
-        console.warn(`[Scraper] Timeout at ${url}. Retrying...`);
+      if (error.name === "AbortError" && retryCount < 2) {
+        console.warn(`[Scraper] Timeout at ${url.split('?')[0]}. Retrying...`);
         return this.fetchWithTimeout(url, options, timeout, retryCount + 1);
       }
       throw error;
@@ -94,15 +131,15 @@ export class ScraperService {
    */
   private async cleanupStaleTasks() {
     const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
-    
+
     // Clean up tasks that are still 'running' but haven't been updated recently
     const { data: staleTasks } = await supabase
-      .from('scraper_logs')
-      .select('id, task_name, progress, created_at')
-      .eq('status', 'running');
+      .from("scraper_logs")
+      .select("id, task_name, progress, created_at")
+      .eq("status", "running");
 
     if (staleTasks && staleTasks.length > 0) {
-      const toClean = staleTasks.filter(t => {
+      const toClean = staleTasks.filter((t) => {
         // Use _lastUpdated from progress JSON, fallback to created_at
         const lastTouch = (t.progress as any)?._lastUpdated || t.created_at;
         const lastTouchMs = lastTouch ? new Date(lastTouch).getTime() : 0;
@@ -110,17 +147,20 @@ export class ScraperService {
       });
 
       if (toClean.length > 0) {
-        console.log(`[Scraper] Cleaning up ${toClean.length} stale tasks:`, toClean.map(t => t.task_name));
-        
-        const ids = toClean.map(t => t.id);
+        console.log(
+          `[Scraper] Cleaning up ${toClean.length} stale tasks:`,
+          toClean.map((t) => t.task_name),
+        );
+
+        const ids = toClean.map((t) => t.id);
         await supabase
-          .from('scraper_logs')
-          .update({ 
-            status: 'failed', 
-            error_message: 'Task timed out (stale task auto-cleanup 2m)',
-            finished_at: new Date().toISOString()
+          .from("scraper_logs")
+          .update({
+            status: "failed",
+            error_message: "Task timed out (stale task auto-cleanup 2m)",
+            finished_at: new Date().toISOString(),
           })
-          .in('id', ids);
+          .in("id", ids);
       }
     }
   }
@@ -131,7 +171,7 @@ export class ScraperService {
   private chunkStartTime = 0;
   private isChunkTimedOut(safetyMs = 8000): boolean {
     if (!this.chunkStartTime) return false;
-    return (Date.now() - this.chunkStartTime) >= safetyMs;
+    return Date.now() - this.chunkStartTime >= safetyMs;
   }
 
   /**
@@ -143,74 +183,103 @@ export class ScraperService {
 
     // 2. Check DB for any 'running' task with the SAME name
     const { data: existingRunning } = await supabase
-      .from('scraper_logs')
-      .select('id, created_at')
-      .eq('task_name', taskName)
-      .eq('status', 'running')
+      .from("scraper_logs")
+      .select("id, created_at")
+      .eq("task_name", taskName)
+      .eq("status", "running")
       .single();
 
     if (existingRunning) {
       // If the existing running task is older than 3 minutes, force-kill it and proceed
       const age = Date.now() - new Date(existingRunning.created_at).getTime();
       if (age > 3 * 60 * 1000) {
-        console.warn(`[Scraper] Force-killing stale task ${existingRunning.id} (age: ${Math.round(age/1000)}s)`);
+        console.warn(
+          `[Scraper] Force-killing stale task ${existingRunning.id} (age: ${Math.round(age / 1000)}s)`,
+        );
         await supabase
-          .from('scraper_logs')
-          .update({ 
-            status: 'failed', 
-            error_message: 'Force-killed: task was stale',
-            finished_at: new Date().toISOString()
+          .from("scraper_logs")
+          .update({
+            status: "failed",
+            error_message: "Force-killed: task was stale",
+            finished_at: new Date().toISOString(),
           })
-          .eq('id', existingRunning.id);
+          .eq("id", existingRunning.id);
       } else {
-        console.warn(`[Scraper] Task ${taskName} is already marked as running in DB (age: ${Math.round(age/1000)}s). Skipping.`);
+        console.warn(
+          `[Scraper] Task ${taskName} is already marked as running in DB (age: ${Math.round(age / 1000)}s). Skipping.`,
+        );
         return null;
       }
     }
 
     const now = new Date().toISOString();
     const { data, error } = await supabase
-      .from('scraper_logs')
+      .from("scraper_logs")
       .insert({
         task_name: taskName,
-        status: 'running',
-        progress: { current: 0, total: 100, current_item: 'Memulai scraper...', _lastUpdated: now }
+        status: "running",
+        progress: {
+          current: 0,
+          total: 100,
+          current_item: "Memulai scraper...",
+          _lastUpdated: now,
+        },
       })
       .select()
       .single();
-    
-    if (error) console.error('Error creating scraper log:', error.message);
+
+    if (error) console.error("Error creating scraper log:", error.message);
     return data?.id;
   }
 
-  public async updateLog(logId: string, status: 'success' | 'failed', summary: ScrapeTaskSummary, errorMessage?: string) {
+  public async updateLog(
+    logId: string,
+    status: "success" | "failed",
+    summary: ScrapeTaskSummary,
+    errorMessage?: string,
+  ) {
     try {
       await supabase
-        .from('scraper_logs')
+        .from("scraper_logs")
         .update({
           status,
           summary,
           error_message: errorMessage,
           finished_at: new Date().toISOString(),
           items_count: summary.items_processed || 0,
-          progress: { current: summary.items_processed || 0, total: summary.items_processed || 0, current_item: 'Selesai', _lastUpdated: new Date().toISOString() }
+          progress: {
+            current: summary.items_processed || 0,
+            total: summary.items_processed || 0,
+            current_item: "Selesai",
+            _lastUpdated: new Date().toISOString(),
+          },
         })
-        .eq('id', logId);
+        .eq("id", logId);
     } catch (err) {
-      console.error('Failed to update scraper log:', err);
+      console.error("Failed to update scraper log:", err);
     }
   }
 
-  public async updateLogProgress(logId: string, current: number, total: number, currentItem: string) {
+  public async updateLogProgress(
+    logId: string,
+    current: number,
+    total: number,
+    currentItem: string,
+  ) {
     try {
       await supabase
-        .from('scraper_logs')
+        .from("scraper_logs")
         .update({
-          progress: { current, total, current_item: currentItem, _lastUpdated: new Date().toISOString() }
+          progress: {
+            current,
+            total,
+            current_item: currentItem,
+            _lastUpdated: new Date().toISOString(),
+          },
         })
-        .eq('id', logId);
+        .eq("id", logId);
     } catch (err) {
-      console.error('Failed to update scraper progress:', err);
+      console.error("Failed to update scraper progress:", err);
     }
   }
 
@@ -219,10 +288,14 @@ export class ScraperService {
    */
   private async checkTaskActive(logId?: string) {
     if (!logId) return;
-    const { data: currentLog } = await supabase.from('scraper_logs').select('status').eq('id', logId).single();
-    if (currentLog && currentLog.status !== 'running') {
-      console.warn(`[Scraper] Task ${logId} is cancelled. Aborting.`);
-      throw new Error('Task Aborted');
+    const { data: currentLog } = await supabase
+      .from("scraper_logs")
+      .select("status")
+      .eq("id", logId)
+      .single();
+    if (currentLog && currentLog.status !== "running") {
+      console.warn(`[Scraper] Task ${logId} was marked as ${currentLog.status}. Aborting current process.`);
+      throw new Error(`Task Aborted: Current status is ${currentLog.status}`);
     }
   }
 
@@ -231,20 +304,21 @@ export class ScraperService {
    */
   private async getScraperConfig() {
     const { data } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'scraper_config')
+      .from("settings")
+      .select("value")
+      .eq("key", "scraper_config")
       .single();
-    
-    return data?.value || {
-      auto_approve: false,
-      vidlink_enabled: true,
-      moviesapito_enabled: true,
-      videasy_enabled: true,
-      auto_scrape_enabled: false,
-      scraper_secret: '',
-      discovery_pages: 3
-    };
+
+    return (
+      data?.value || {
+        auto_approve: false,
+        moviesapito_enabled: true,
+        videasy_enabled: true,
+        auto_scrape_enabled: false,
+        scraper_secret: "",
+        discovery_pages: 3,
+      }
+    );
   }
 
   /**
@@ -252,35 +326,53 @@ export class ScraperService {
    */
   private async getScraperProgress() {
     const { data } = await supabase
-      .from('settings')
-      .select('*')
-      .eq('key', 'scraper_progress')
+      .from("settings")
+      .select("*")
+      .eq("key", "scraper_progress")
       .single();
-    
+
     return data?.value || {};
   }
 
   private async updateScraperProgress(progress: Record<string, number>) {
     await supabase
-      .from('settings')
-      .upsert({ key: 'scraper_progress', value: progress }, { onConflict: 'key' });
+      .from("settings")
+      .upsert(
+        { key: "scraper_progress", value: progress },
+        { onConflict: "key" },
+      );
   }
 
   /**
    * Deep Scrape TV Series Details (Seasons & Episodes)
    */
-  private async scrapeTVDetails(contentId: string, tmdbId: number, logId?: string, currentProcessed?: number, totalEstimated?: number, showTitle?: string) {
+  private async scrapeTVDetails(
+    contentId: string,
+    tmdbId: number,
+    logId?: string,
+    currentProcessed?: number,
+    totalEstimated?: number,
+    showTitle?: string,
+  ) {
     try {
       // 0. Check if task is still active in DB if logId is provided
       if (logId) {
-        const { data: currentLog } = await supabase.from('scraper_logs').select('status').eq('id', logId).single();
-        if (currentLog?.status !== 'running') {
-           console.log(`[Scraper] Task ${logId} is no longer running. Aborting TV details.`);
-           return;
+        const { data: currentLog } = await supabase
+          .from("scraper_logs")
+          .select("status")
+          .eq("id", logId)
+          .single();
+        if (currentLog?.status !== "running") {
+          console.log(
+            `[Scraper] Task ${logId} is no longer running. Aborting TV details.`,
+          );
+          return;
         }
       }
 
-      const res = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbApiKey}`);
+      const res = await this.fetchWithTimeout(
+        `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbApiKey}`,
+      );
       const data = await res.json();
 
       if (!data.seasons) return;
@@ -289,47 +381,64 @@ export class ScraperService {
       const validSeasons = data.seasons.filter((s: any) => s.season_number > 0);
 
       // Process seasons in parallel (max 3 at a time) to stay within timeouts
-      await this.pMap(validSeasons, async (seasonItem: any) => {
-        try {
-          const { data: dbSeason, error: sError } = await supabase
-            .from('seasons')
-            .upsert({
-              content_id: contentId,
-              season_number: seasonItem.season_number,
-              title: seasonItem.name,
-              overview: seasonItem.overview,
-              poster_path: seasonItem.poster_path,
-              air_date: seasonItem.air_date,
-              episode_count: seasonItem.episode_count
-            }, { onConflict: 'content_id,season_number' })
-            .select().single();
+      await this.pMap(
+        validSeasons,
+        async (seasonItem: any) => {
+          try {
+            const { data: dbSeason, error: sError } = await supabase
+              .from("seasons")
+              .upsert(
+                {
+                  content_id: contentId,
+                  season_number: seasonItem.season_number,
+                  title: seasonItem.name,
+                  overview: seasonItem.overview,
+                  poster_path: seasonItem.poster_path,
+                  air_date: seasonItem.air_date,
+                  episode_count: seasonItem.episode_count,
+                },
+                { onConflict: "content_id,season_number" },
+              )
+              .select()
+              .single();
 
-          if (sError || !dbSeason) return;
+            if (sError || !dbSeason) return;
 
-          const sRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`);
-          if (!sRes.ok) return;
-          const sData = await sRes.json();
+            const sRes = await this.fetchWithTimeout(
+              `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonItem.season_number}?api_key=${tmdbApiKey}`,
+            );
+            if (!sRes.ok) return;
+            const sData = await sRes.json();
 
-          if (sData.episodes && sData.episodes.length > 0) {
-            const episodesToUpsert = sData.episodes.map((ep: any) => ({
-              season_id: dbSeason.id,
-              episode_number: ep.episode_number,
-              title: ep.name,
-              overview: ep.overview,
-              still_path: ep.still_path,
-              air_date: ep.air_date
-            }));
+            if (sData.episodes && sData.episodes.length > 0) {
+              const episodesToUpsert = sData.episodes.map((ep: any) => ({
+                season_id: dbSeason.id,
+                episode_number: ep.episode_number,
+                title: ep.name,
+                overview: ep.overview,
+                still_path: ep.still_path,
+                air_date: ep.air_date,
+              }));
 
-            await supabase
-              .from('episodes')
-              .upsert(episodesToUpsert, { onConflict: 'season_id,episode_number' });
+              await supabase
+                .from("episodes")
+                .upsert(episodesToUpsert, {
+                  onConflict: "season_id,episode_number",
+                });
 
-            console.log(`[Scraper] Updated ${episodesToUpsert.length} episodes for ${showTitle || tmdbId} S${seasonItem.season_number}`);
+              console.log(
+                `[Scraper] Updated ${episodesToUpsert.length} episodes for ${showTitle || tmdbId} S${seasonItem.season_number}`,
+              );
+            }
+          } catch (seasonErr: any) {
+            console.error(
+              `[Scraper] Error processing season ${seasonItem.season_number}:`,
+              seasonErr.message,
+            );
           }
-        } catch (seasonErr: any) {
-          console.error(`[Scraper] Error processing season ${seasonItem.season_number}:`, seasonErr.message);
-        }
-      }, 3);
+        },
+        3,
+      );
     } catch (err: any) {
       console.error(`Error scraping TV details for ${tmdbId}:`, err.message);
     }
@@ -338,103 +447,138 @@ export class ScraperService {
   /**
    * Netflix Priority Discovery Task
    */
-  public async runNetflixDiscovery(pagesPerType: number = 3): Promise<ScrapeTaskSummary> {
-    return this.runNetworkDiscovery('netflix', pagesPerType);
+  public async runNetflixDiscovery(
+    pagesPerType: number = 3,
+  ): Promise<ScrapeTaskSummary> {
+    return this.runNetworkDiscovery("netflix", pagesPerType);
   }
 
   /**
    * Universal Network Discovery Task — works for any platform
    */
-  public async runNetworkDiscovery(networkSlug: string, pagesPerType: number = 3): Promise<ScrapeTaskSummary> {
-    const NETWORK_DISCOVERY_CONFIG: Record<string, { name: string; tvNetworkIds: number[]; movieProviderIds: number[]; watchRegions: string[] }> = {
+  public async runNetworkDiscovery(
+    networkSlug: string,
+    pagesPerType: number = 3,
+  ): Promise<ScrapeTaskSummary> {
+    const NETWORK_DISCOVERY_CONFIG: Record<
+      string,
+      {
+        name: string;
+        tvNetworkIds: number[];
+        movieProviderIds: number[];
+        watchRegions: string[];
+      }
+    > = {
       netflix: {
-        name: 'Netflix',
+        name: "Netflix",
         tvNetworkIds: [213],
         movieProviderIds: [8],
-        watchRegions: ['US', 'ID', 'KR', 'JP', 'GB']
+        watchRegions: ["US", "ID", "KR", "JP", "GB"],
       },
       disney: {
-        name: 'Disney+',
+        name: "Disney+",
         tvNetworkIds: [2739, 3353],
         movieProviderIds: [337, 390],
-        watchRegions: ['US', 'ID', 'GB', 'KR']
+        watchRegions: ["US", "ID", "GB", "KR"],
       },
       hbo: {
-        name: 'HBO / Max',
+        name: "HBO / Max",
         tvNetworkIds: [49, 3186, 2832],
         movieProviderIds: [384, 1899],
-        watchRegions: ['US', 'GB']
+        watchRegions: ["US", "GB"],
       },
       amazon: {
-        name: 'Prime Video',
+        name: "Prime Video",
         tvNetworkIds: [1024, 4353],
         movieProviderIds: [9, 119, 10],
-        watchRegions: ['US', 'ID', 'GB', 'JP']
+        watchRegions: ["US", "ID", "GB", "JP"],
       },
       apple: {
-        name: 'Apple TV+',
+        name: "Apple TV+",
         tvNetworkIds: [2552],
         movieProviderIds: [350, 2],
-        watchRegions: ['US', 'GB']
+        watchRegions: ["US", "GB"],
       },
       paramount: {
-        name: 'Paramount+',
+        name: "Paramount+",
         tvNetworkIds: [4330, 2076],
         movieProviderIds: [531, 37],
-        watchRegions: ['US', 'GB']
-      }
+        watchRegions: ["US", "GB"],
+      },
     };
 
     const config = NETWORK_DISCOVERY_CONFIG[networkSlug];
     if (!config) {
-      return { items_processed: 0, items_added: 0, items_failed: 0, errors: [`Unknown network: ${networkSlug}`] };
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: [`Unknown network: ${networkSlug}`],
+      };
     }
 
     const taskName = `${config.name} Discovery`;
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
-    
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
+
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     try {
       await this.executeNetworkDiscovery(config, pagesPerType, logId, summary);
-      if (logId) await this.updateLog(logId, 'success', summary);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
       console.error(`${config.name} Discovery error:`, err);
-      if (err.message === 'Task Aborted') return summary; 
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
   }
 
   private async executeNetworkDiscovery(
-    config: { name: string; tvNetworkIds: number[]; movieProviderIds: number[]; watchRegions: string[] },
+    config: {
+      name: string;
+      tvNetworkIds: number[];
+      movieProviderIds: number[];
+      watchRegions: string[];
+    },
     pagesPerType: number,
     logId: string,
-    summary: ScrapeTaskSummary
+    summary: ScrapeTaskSummary,
   ) {
     const scraperConfig = await this.getScraperConfig();
-    
+
     // Build tasks: TV by network IDs + Movies by watch provider IDs (multi-region)
     const tasks: Array<{ type: string; url: string; label: string }> = [];
-    
+
     // TV Series tasks (by network ID)
     for (const networkId of config.tvNetworkIds) {
       tasks.push({
-        type: 'tv',
+        type: "tv",
         url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${networkId}&sort_by=popularity.desc`,
-        label: `${config.name} TV (Network ${networkId})`
+        label: `${config.name} TV (Network ${networkId})`,
       });
     }
 
     // Movie tasks (by watch provider, multi-region for broader coverage)
     for (const providerId of config.movieProviderIds) {
-      for (const region of config.watchRegions.slice(0, 2)) { // Limit to 2 regions to stay within time
+      for (const region of config.watchRegions.slice(0, 2)) {
+        // Limit to 2 regions to stay within time
         tasks.push({
-          type: 'movie',
+          type: "movie",
           url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc`,
-          label: `${config.name} Movie (Provider ${providerId}, ${region})`
+          label: `${config.name} Movie (Provider ${providerId}, ${region})`,
         });
       }
     }
@@ -443,25 +587,39 @@ export class ScraperService {
       for (let page = 1; page <= pagesPerType; page++) {
         await this.checkTaskActive(logId);
         console.log(`[Scraper] ${task.label} | Page ${page}`);
-        
+
         const res = await this.fetchWithTimeout(`${task.url}&page=${page}`);
         const data = await res.json();
 
         if (data.results && data.results.length > 0) {
-          await this.pMap(data.results, async (item: any) => {
-            summary.items_processed++;
-            if (logId) {
-              const totalEstimated = tasks.length * pagesPerType * 20;
-              await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || `Scanning ${config.name}...`);
-            }
+          await this.pMap(
+            data.results,
+            async (item: any) => {
+              summary.items_processed++;
+              if (logId) {
+                const totalEstimated = tasks.length * pagesPerType * 20;
+                await this.updateLogProgress(
+                  logId,
+                  summary.items_processed,
+                  totalEstimated,
+                  item.title || item.name || `Scanning ${config.name}...`,
+                );
+              }
 
-            try {
-              const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig);
-              if (saved) summary.items_added++;
-            } catch {
-              summary.items_failed++;
-            }
-          }, 3, () => this.checkTaskActive(logId));
+              try {
+                const saved = await this.processAndSaveContent(
+                  item,
+                  task.type as "movie" | "tv",
+                  scraperConfig,
+                );
+                if (saved) summary.items_added++;
+              } catch {
+                summary.items_failed++;
+              }
+            },
+            3,
+            () => this.checkTaskActive(logId),
+          );
         }
       }
     }
@@ -470,8 +628,17 @@ export class ScraperService {
   /**
    * Discover content for ALL networks
    */
-  public async runAllNetworksDiscovery(pagesPerNetwork: number = 2): Promise<ScrapeTaskSummary[]> {
-    const networks = ['netflix', 'disney', 'hbo', 'amazon', 'apple', 'paramount'];
+  public async runAllNetworksDiscovery(
+    pagesPerNetwork: number = 2,
+  ): Promise<ScrapeTaskSummary[]> {
+    const networks = [
+      "netflix",
+      "disney",
+      "hbo",
+      "amazon",
+      "apple",
+      "paramount",
+    ];
     const results: ScrapeTaskSummary[] = [];
     for (const net of networks) {
       const result = await this.runNetworkDiscovery(net, pagesPerNetwork);
@@ -484,59 +651,86 @@ export class ScraperService {
    * Re-classify existing content based on new/expanded network IDs
    */
   public async runReclassifyContent(limit = 100): Promise<ScrapeTaskSummary> {
-    const taskName = 'Platform Re-classification';
+    const taskName = "Platform Re-classification";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
 
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
 
     try {
       const { data: contents } = await supabase
-        .from('contents')
-        .select('id, tmdb_id, type, title, platform')
-        .or('platform.eq.other,platform.is.null')
-        .order('created_at', { ascending: false })
+        .from("contents")
+        .select("id, tmdb_id, type, title, platform")
+        .or("platform.eq.other,platform.is.null")
+        .order("created_at", { ascending: false })
         .limit(limit);
 
       if (!contents || contents.length === 0) {
-        if (logId) await this.updateLog(logId, 'success', summary);
+        if (logId) await this.updateLog(logId, "success", summary);
         return summary;
       }
 
-      await this.pMap(contents, async (item: any) => {
-        summary.items_processed++;
-        if (logId) {
-          await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title || `ID: ${item.tmdb_id}`);
-        }
-
-        try {
-          const tmdbBaseType = (item.type === 'movie') ? 'movie' : 'tv';
-          const metadata = await fetchTMDBMetadata(item.tmdb_id, tmdbBaseType);
-          if (!metadata) {
-             // If not found, mark as other to avoid repeating
-             await supabase.from('contents').update({ platform: 'other' }).eq('id', item.id);
-             return;
+      await this.pMap(
+        contents,
+        async (item: any) => {
+          summary.items_processed++;
+          if (logId) {
+            await this.updateLogProgress(
+              logId,
+              summary.items_processed,
+              contents.length,
+              item.title || `ID: ${item.tmdb_id}`,
+            );
           }
 
-          const newPlatform = classifyPlatform(metadata, item.type);
-          
-          if (newPlatform !== item.platform) {
-            await supabase
-              .from('contents')
-              .update({ platform: newPlatform })
-              .eq('id', item.id);
-            summary.items_added++;
-          }
-        } catch (err: any) {
-          summary.items_failed++;
-          summary.errors.push(`${item.title}: ${err.message}`);
-        }
-      }, 5, () => this.checkTaskActive(logId));
+          try {
+            const tmdbBaseType = item.type === "movie" ? "movie" : "tv";
+            const metadata = await fetchTMDBMetadata(
+              item.tmdb_id,
+              tmdbBaseType,
+            );
+            if (!metadata) {
+              // If not found, mark as other to avoid repeating
+              await supabase
+                .from("contents")
+                .update({ platform: "other" })
+                .eq("id", item.id);
+              return;
+            }
 
-      if (logId) await this.updateLog(logId, 'success', summary);
+            const newPlatform = classifyPlatform(metadata, item.type);
+
+            if (newPlatform !== item.platform) {
+              await supabase
+                .from("contents")
+                .update({ platform: newPlatform })
+                .eq("id", item.id);
+              summary.items_added++;
+            }
+          } catch (err: any) {
+            summary.items_failed++;
+            summary.errors.push(`${item.title}: ${err.message}`);
+          }
+        },
+        5,
+        () => this.checkTaskActive(logId),
+      );
+
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
-      if (err.message === 'Task Aborted') return summary;
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
@@ -545,17 +739,28 @@ export class ScraperService {
   /**
    * Chunked Re-classification for Serverless
    */
-  public async runReclassifyContentChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, nextState: Record<string, unknown> }> {
+  public async runReclassifyContentChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
     const offset = (state.offset as number) || 0;
     const chunkSize = 10;
-    
+
     let { data: contents } = await supabase
-      .from('contents')
-      .select('id, tmdb_id, type, title, platform')
-      .or('platform.eq.other,platform.is.null')
-      .order('created_at', { ascending: false })
+      .from("contents")
+      .select("id, tmdb_id, type, title, platform")
+      .or("platform.eq.other,platform.is.null")
+      .order("created_at", { ascending: false })
       .range(offset, offset + chunkSize - 1);
 
     if (!contents || contents.length === 0) {
@@ -565,18 +770,27 @@ export class ScraperService {
     for (const item of contents) {
       if (this.isChunkTimedOut()) break;
       summary.items_processed++;
-      
+
       if (state.logId) {
-        await this.updateLogProgress(state.logId as string, (state.accumulatedProcessed as number || 0) + summary.items_processed, 100, item.title);
+        await this.updateLogProgress(
+          state.logId as string,
+          ((state.accumulatedProcessed as number) || 0) +
+            summary.items_processed,
+          100,
+          item.title,
+        );
       }
 
       try {
-        const tmdbBaseType = (item.type === 'movie') ? 'movie' : 'tv';
+        const tmdbBaseType = item.type === "movie" ? "movie" : "tv";
         const metadata = await fetchTMDBMetadata(item.tmdb_id, tmdbBaseType);
         if (metadata) {
           const newPlatform = classifyPlatform(metadata, item.type);
           if (newPlatform !== item.platform) {
-            await supabase.from('contents').update({ platform: newPlatform }).eq('id', item.id);
+            await supabase
+              .from("contents")
+              .update({ platform: newPlatform })
+              .eq("id", item.id);
             summary.items_added++;
           }
         }
@@ -588,42 +802,76 @@ export class ScraperService {
     const actualProcessed = summary.items_processed;
     const nextOffset = offset + actualProcessed;
     const hasMore = contents.length >= chunkSize;
-    
-    return { 
-      summary, 
-      hasMore, 
-      nextState: hasMore ? { 
-        logId: state.logId, 
-        offset: nextOffset,
-        accumulatedProcessed: (state.accumulatedProcessed as number || 0) + actualProcessed 
-      } : {} 
+
+    return {
+      summary,
+      hasMore,
+      nextState: hasMore
+        ? {
+            logId: state.logId,
+            offset: nextOffset,
+            accumulatedProcessed:
+              ((state.accumulatedProcessed as number) || 0) + actualProcessed,
+          }
+        : {},
     };
   }
 
   /**
    * Chunked Network Discovery for Serverless (Vercel)
    */
-  public async runNetworkDiscoveryChunk(networkSlug: string, pagesPerType: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runNetworkDiscoveryChunk(
+    networkSlug: string,
+    pagesPerType: number = 3,
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
     const scraperConfig = await this.getScraperConfig();
 
     const NETWORK_TV_IDS: Record<string, number[]> = {
-      netflix: [213], disney: [2739, 3353], hbo: [49, 3186, 2832],
-      amazon: [1024, 4353], apple: [2552], paramount: [4330, 2076]
+      netflix: [213],
+      disney: [2739, 3353],
+      hbo: [49, 3186, 2832],
+      amazon: [1024, 4353],
+      apple: [2552],
+      paramount: [4330, 2076],
     };
     const NETWORK_MOVIE_PROVIDERS: Record<string, number[]> = {
-      netflix: [8], disney: [337], hbo: [384], amazon: [9], apple: [350], paramount: [531]
+      netflix: [8],
+      disney: [337],
+      hbo: [384],
+      amazon: [9],
+      apple: [350],
+      paramount: [531],
     };
 
-    let allTasks = state.tasks as Array<{ type: string; url: string }> | undefined;
+    let allTasks = state.tasks as
+      | Array<{ type: string; url: string }>
+      | undefined;
     if (!allTasks) {
       allTasks = [];
-      for (const nid of (NETWORK_TV_IDS[networkSlug] || [])) {
-        allTasks.push({ type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${nid}&sort_by=popularity.desc` });
+      for (const nid of NETWORK_TV_IDS[networkSlug] || []) {
+        allTasks.push({
+          type: "tv",
+          url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${nid}&sort_by=popularity.desc`,
+        });
       }
-      for (const pid of (NETWORK_MOVIE_PROVIDERS[networkSlug] || [])) {
-        allTasks.push({ type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${pid}&watch_region=US&sort_by=popularity.desc` });
+      for (const pid of NETWORK_MOVIE_PROVIDERS[networkSlug] || []) {
+        allTasks.push({
+          type: "movie",
+          url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${pid}&watch_region=US&sort_by=popularity.desc`,
+        });
       }
     }
 
@@ -641,23 +889,43 @@ export class ScraperService {
 
     if (data.results && data.results.length > 0) {
       const CHUNK_SIZE = 3;
-      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
-      
+      const resultsToProcess = data.results.slice(
+        currentItemIndex,
+        currentItemIndex + CHUNK_SIZE,
+      );
+
       const tmdbIds = resultsToProcess.map((i: any) => i.id);
-      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
-      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+      const { data: existingRecords } = await supabase
+        .from("contents")
+        .select("tmdb_id")
+        .in("tmdb_id", tmdbIds);
+      const existingIds = new Set(
+        existingRecords?.map((r: any) => r.tmdb_id) || [],
+      );
 
       for (const item of resultsToProcess) {
         if (this.isChunkTimedOut()) break;
         summary.items_processed++;
         if (state.logId) {
           const totalEstimated = allTasks.length * pagesPerType * 20;
-          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || `Scanning ${networkSlug}...`);
+          const currentTotalProcessed =
+            ((state.accumulatedProcessed as number) || 0) +
+            summary.items_processed;
+          await this.updateLogProgress(
+            state.logId as string,
+            currentTotalProcessed,
+            totalEstimated,
+            item.title || item.name || `Scanning ${networkSlug}...`,
+          );
         }
-        if (existingIds.has(item.id) && task.type === 'movie') continue;
+        if (existingIds.has(item.id) && task.type === "movie") continue;
         try {
-          const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig, { skipDeepScrapeTV: true });
+          const saved = await this.processAndSaveContent(
+            item,
+            task.type as "movie" | "tv",
+            scraperConfig,
+            { skipDeepScrapeTV: true },
+          );
           if (saved) summary.items_added++;
         } catch {
           summary.items_failed++;
@@ -670,7 +938,11 @@ export class ScraperService {
     if (nextItemIndex >= (data.results?.length || 0)) {
       nextItemIndex = 0;
       currentPage++;
-      if (currentPage > pagesPerType || !data.results || data.results.length === 0) {
+      if (
+        currentPage > pagesPerType ||
+        !data.results ||
+        data.results.length === 0
+      ) {
         currentTaskIndex++;
         currentPage = 1;
       }
@@ -683,41 +955,74 @@ export class ScraperService {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { tasks: allTasks, currentTaskIndex, currentPage, currentItemIndex: nextItemIndex } : {}
+      nextState: hasMore
+        ? {
+            tasks: allTasks,
+            currentTaskIndex,
+            currentPage,
+            currentItemIndex: nextItemIndex,
+          }
+        : {},
     };
   }
 
-  private async executeNetflixDiscovery(pagesPerType: number, logId: string, summary: ScrapeTaskSummary) {
+  private async executeNetflixDiscovery(
+    pagesPerType: number,
+    logId: string,
+    summary: ScrapeTaskSummary,
+  ) {
     const scraperConfig = await this.getScraperConfig();
-    
+
     const tasks = [
-      { type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc` },
-      { type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc` }
+      {
+        type: "tv",
+        url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc`,
+      },
+      {
+        type: "movie",
+        url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc`,
+      },
     ];
 
     for (const task of tasks) {
       for (let page = 1; page <= pagesPerType; page++) {
         await this.checkTaskActive(logId);
-        console.log(`[Scraper] Netflix Priority: ${task.type.toUpperCase()} | Page ${page}`);
-        
+        console.log(
+          `[Scraper] Netflix Priority: ${task.type.toUpperCase()} | Page ${page}`,
+        );
+
         const res = await this.fetchWithTimeout(`${task.url}&page=${page}`);
         const data = await res.json();
 
         if (data.results && data.results.length > 0) {
-          await this.pMap(data.results, async (item: any) => {
-            summary.items_processed++;
-            if (logId) {
-              const totalEstimated = tasks.length * pagesPerType * 20;
-              await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || 'Scanning Netflix...');
-            }
+          await this.pMap(
+            data.results,
+            async (item: any) => {
+              summary.items_processed++;
+              if (logId) {
+                const totalEstimated = tasks.length * pagesPerType * 20;
+                await this.updateLogProgress(
+                  logId,
+                  summary.items_processed,
+                  totalEstimated,
+                  item.title || item.name || "Scanning Netflix...",
+                );
+              }
 
-            try {
-              const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig);
-              if (saved) summary.items_added++;
-            } catch {
-              summary.items_failed++;
-            }
-          }, 3, () => this.checkTaskActive(logId));
+              try {
+                const saved = await this.processAndSaveContent(
+                  item,
+                  task.type as "movie" | "tv",
+                  scraperConfig,
+                );
+                if (saved) summary.items_added++;
+              } catch {
+                summary.items_failed++;
+              }
+            },
+            3,
+            () => this.checkTaskActive(logId),
+          );
         }
       }
     }
@@ -726,44 +1031,67 @@ export class ScraperService {
   /**
    * Full Discovery & Scrape Task with Page Tracking
    */
-  public async runDiscovery(pagesPerGenre: number = 3): Promise<ScrapeTaskSummary> {
-    const taskName = 'Deep Discovery Scrape';
+  public async runDiscovery(
+    pagesPerGenre: number = 3,
+  ): Promise<ScrapeTaskSummary> {
+    const taskName = "Deep Discovery Scrape";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
-    
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
+
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     try {
       await this.executeDiscovery(pagesPerGenre, logId, summary);
-      if (logId) await this.updateLog(logId, 'success', summary);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
       console.error("Discovery error:", err);
       // If manually aborted, don't write generic error, keep status
-      if (err.message === 'Task Aborted') return summary; 
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
   }
 
-  private async executeDiscovery(pagesPerGenre: number, logId: string, summary: ScrapeTaskSummary) {
+  private async executeDiscovery(
+    pagesPerGenre: number,
+    logId: string,
+    summary: ScrapeTaskSummary,
+  ) {
     const scraperConfig = await this.getScraperConfig();
     const progress = await this.getScraperProgress();
-    
+
     // Fetch all genres from TMDB
-    const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
-    const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
-    
+    const movieGenreRes = await this.fetchWithTimeout(
+      `https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`,
+    );
+    const tvGenreRes = await this.fetchWithTimeout(
+      `https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`,
+    );
+
     const { genres: movieGenres } = await movieGenreRes.json();
     const { genres: tvGenres } = await tvGenreRes.json();
 
     if (!movieGenres || !tvGenres) {
-       throw new Error("Failed to fetch genres from TMDB - API limit or invalid key");
+      throw new Error(
+        "Failed to fetch genres from TMDB - API limit or invalid key",
+      );
     }
 
     const allTasks = [
-      ...movieGenres.map((g: any) => ({ ...g, type: 'movie' })),
-      ...tvGenres.map((g: any) => ({ ...g, type: 'tv' }))
+      ...movieGenres.map((g: any) => ({ ...g, type: "movie" })),
+      ...tvGenres.map((g: any) => ({ ...g, type: "tv" })),
     ];
 
     for (const genre of allTasks) {
@@ -771,50 +1099,74 @@ export class ScraperService {
       const startPage = progress[key] || 1;
       const endPage = startPage + pagesPerGenre - 1;
 
-      console.log(`🔍 Scraping Genre: ${genre.name} (${genre.type}) | Pages ${startPage}-${endPage}`);
+      console.log(
+        `🔍 Scraping Genre: ${genre.name} (${genre.type}) | Pages ${startPage}-${endPage}`,
+      );
 
       for (let page = startPage; page <= endPage; page++) {
         await this.checkTaskActive(logId);
-        
+
         const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${page}`;
         const res = await this.fetchWithTimeout(url);
         const data = await res.json();
-        
+
         await this.delay(400);
 
         if (!data.results || data.results.length === 0) break;
 
-        await this.pMap(data.results, async (item: any) => {
-          summary.items_processed++;
-          
-          if (logId) {
-            const totalEstimated = allTasks.length * pagesPerGenre * 20;
-            await this.updateLogProgress(logId, summary.items_processed, totalEstimated, item.title || item.name || 'Scanning...');
-          }
+        await this.pMap(
+          data.results,
+          async (item: any) => {
+            summary.items_processed++;
 
-          try {
-            const totalEstimated = allTasks.length * pagesPerGenre * 20;
-            const saved = await this.processAndSaveContent(item, genre.type as any, scraperConfig, {
-              logId,
-              summary,
-              totalEstimated
-            });
-            
-            if (saved) {
-              try {
-                await SubtitleService.fetchAndUploadSubtitle(item.id, genre.type as 'movie' | 'tv');
-              } catch (sErr) {
-                console.warn(`[Scraper] Subtitle fetch failed for ${item.id}:`, sErr);
+            if (logId) {
+              const totalEstimated = allTasks.length * pagesPerGenre * 20;
+              await this.updateLogProgress(
+                logId,
+                summary.items_processed,
+                totalEstimated,
+                item.title || item.name || "Scanning...",
+              );
+            }
+
+            try {
+              const totalEstimated = allTasks.length * pagesPerGenre * 20;
+              const saved = await this.processAndSaveContent(
+                item,
+                genre.type as any,
+                scraperConfig,
+                {
+                  logId,
+                  summary,
+                  totalEstimated,
+                },
+              );
+
+              if (saved) {
+                try {
+                  await SubtitleService.fetchAndUploadSubtitle(
+                    item.id,
+                    genre.type as "movie" | "tv",
+                  );
+                } catch (sErr) {
+                  console.warn(
+                    `[Scraper] Subtitle fetch failed for ${item.id}:`,
+                    sErr,
+                  );
+                }
+                summary.items_added++;
               }
-              summary.items_added++;
+            } catch (err: any) {
+              summary.items_failed++;
+              if (summary.errors.length < 50) {
+                // Limit error log size
+                summary.errors.push(`${item.title || item.id}: ${err.message}`);
+              }
             }
-          } catch (err: any) {
-            summary.items_failed++;
-            if (summary.errors.length < 50) { // Limit error log size
-              summary.errors.push(`${item.title || item.id}: ${err.message}`);
-            }
-          }
-        }, 5, () => this.checkTaskActive(logId));
+          },
+          5,
+          () => this.checkTaskActive(logId),
+        );
 
         progress[key] = page + 1;
         await this.updateScraperProgress(progress);
@@ -826,19 +1178,30 @@ export class ScraperService {
    * Scrape Trending Content
    */
   public async runTrendingDiscovery(): Promise<ScrapeTaskSummary> {
-    const taskName = 'Trending Discovery';
+    const taskName = "Trending Discovery";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
 
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     try {
       await this.executeTrending(logId, summary);
-      if (logId) await this.updateLog(logId, 'success', summary);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
       console.error("Trending error:", err);
-      if (err.message === 'Task Aborted') return summary;
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
     return summary;
   }
@@ -850,93 +1213,136 @@ export class ScraperService {
     const data = await res.json();
 
     if (data.results) {
-      await this.pMap(data.results, async (item: any) => {
-        if (item.media_type !== 'movie' && item.media_type !== 'tv') return;
-        
-        summary.items_processed++;
-        
-        if (logId) {
-          await this.updateLogProgress(logId, summary.items_processed, data.results.length, item.title || item.name || 'Scanning...');
-        }
+      await this.pMap(
+        data.results,
+        async (item: any) => {
+          if (item.media_type !== "movie" && item.media_type !== "tv") return;
 
-        try {
-          const saved = await this.processAndSaveContent(item, item.media_type as 'movie' | 'tv', scraperConfig, {
-            logId,
-            summary,
-            totalEstimated: data.results.length
-          });
-          
-          if (saved) {
-            try {
-              await SubtitleService.fetchAndUploadSubtitle(item.id, item.media_type as 'movie' | 'tv');
-            } catch (sErr) {
-              console.warn(`[Scraper] Subtitle fetch failed for trending ${item.id}:`, sErr);
-            }
-            summary.items_added++;
+          summary.items_processed++;
+
+          if (logId) {
+            await this.updateLogProgress(
+              logId,
+              summary.items_processed,
+              data.results.length,
+              item.title || item.name || "Scanning...",
+            );
           }
-        } catch (err: any) {
-          summary.items_failed++;
-        }
-      }, 3, () => this.checkTaskActive(logId));
+
+          try {
+            const saved = await this.processAndSaveContent(
+              item,
+              item.media_type as "movie" | "tv",
+              scraperConfig,
+              {
+                logId,
+                summary,
+                totalEstimated: data.results.length,
+              },
+            );
+
+            if (saved) {
+              try {
+                await SubtitleService.fetchAndUploadSubtitle(
+                  item.id,
+                  item.media_type as "movie" | "tv",
+                );
+              } catch (sErr) {
+                console.warn(
+                  `[Scraper] Subtitle fetch failed for trending ${item.id}:`,
+                  sErr,
+                );
+              }
+              summary.items_added++;
+            }
+          } catch (err: any) {
+            summary.items_failed++;
+          }
+        },
+        3,
+        () => this.checkTaskActive(logId),
+      );
     }
   }
 
-  /**
-   * Full Daily Routine: All Networks + Trending + Genre Discovery
-   */
-  public async runFullRoutine(pages: number = 5): Promise<ScrapeTaskSummary[]> {
-    console.log(`🚀 Starting Full Scraper Routine (Intensity: ${pages} pages)...`);
-    const networkResults = await this.runAllNetworksDiscovery(Math.min(pages, 2)); // 2 pages per network to manage API limits
-    const trending = await this.runTrendingDiscovery();
-    const discovery = await this.runDiscovery(pages);
-    return [...networkResults, trending, discovery];
-  }
 
   /**
    * Health Check Task: Validates if links are active (200 OK)
    */
   public async validateLinks(): Promise<ScrapeTaskSummary> {
-    const taskName = 'Health Check Validation';
+    const taskName = "Health Check Validation";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
 
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
 
     try {
-      const { data: links } = await supabase.from('embed_links').select('*, contents(id, title)');
-      
+      const { data: links } = await supabase
+        .from("embed_links")
+        .select("*, contents(id, title)");
+
       if (links) {
-        await this.pMap(links, async (link: any) => {
-          summary.items_processed++;
-          
-          if (logId) {
-            const title = Array.isArray(link.contents) ? link.contents[0]?.title : link.contents?.title;
-            await this.updateLogProgress(logId, summary.items_processed, links.length, title || link.url || 'Scanning...');
-          }
+        await this.pMap(
+          links,
+          async (link: any) => {
+            summary.items_processed++;
 
-          try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000); 
+            if (logId) {
+              const title = Array.isArray(link.contents)
+                ? link.contents[0]?.title
+                : link.contents?.title;
+              await this.updateLogProgress(
+                logId,
+                summary.items_processed,
+                links.length,
+                title || link.url || "Scanning...",
+              );
+            }
 
-            const res = await fetch(link.url, { method: 'GET', signal: controller.signal, headers: { 'Range': 'bytes=0-0' } });
-            clearTimeout(timeout);
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 8000);
 
-            const isHealthy = res.ok || res.status === 403 || res.status === 206; 
-            
-            await supabase.from('contents').update({ 
-              is_healthy: isHealthy,
-              last_checked_at: new Date().toISOString()
-            }).eq('id', link.content_id);
+              const res = await fetch(link.url, {
+                method: "GET",
+                signal: controller.signal,
+                headers: { Range: "bytes=0-0" },
+              });
+              clearTimeout(timeout);
 
-          } catch (err: any) {
-            summary.items_failed++;
-          }
-        }, 5, () => this.checkTaskActive(logId));
+              const isHealthy =
+                res.ok || res.status === 403 || res.status === 206;
+
+              await supabase
+                .from("contents")
+                .update({
+                  is_healthy: isHealthy,
+                  last_checked_at: new Date().toISOString(),
+                })
+                .eq("id", link.content_id);
+            } catch (err: any) {
+              summary.items_failed++;
+            }
+          },
+          5,
+          () => this.checkTaskActive(logId),
+        );
       }
-      if (logId) await this.updateLog(logId, 'success', summary);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
-      if (err.message === 'Task Aborted') return summary;
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
@@ -946,66 +1352,102 @@ export class ScraperService {
    * Sync existing TV Series details and Genres
    */
   public async syncAllMetadata(): Promise<ScrapeTaskSummary> {
-    const taskName = 'Full Metadata Sync';
+    const taskName = "Full Metadata Sync";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
 
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     try {
       await this.executeSyncAllMetadata(logId, summary);
-      if (logId) await this.updateLog(logId, 'success', summary);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
       console.error("Sync error:", err);
-      if (err.message === 'Task Aborted') return summary;
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
   }
 
-  private async executeSyncAllMetadata(logId: string, summary: ScrapeTaskSummary) {
-    const { data: contents } = await supabase.from('contents').select('*');
+  private async executeSyncAllMetadata(
+    logId: string,
+    summary: ScrapeTaskSummary,
+  ) {
+    const { data: contents } = await supabase.from("contents").select("*");
     if (contents) {
-      await this.pMap(contents, async (item: any) => {
-        summary.items_processed++;
-        
-        if (logId) {
-          await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title || 'Scanning...');
-        }
+      await this.pMap(
+        contents,
+        async (item: any) => {
+          summary.items_processed++;
 
-        try {
-          const tmdbType = (item.type === 'movie') ? 'movie' : 'tv';
-          const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-          const metadata: TMDBMetadata = await resMetadata.json();
-          
-          const finalType = classifyContentType(metadata, tmdbType);
-          const platform = classifyPlatform(metadata, finalType);
-          const genreNames = metadata.genres?.map(g => g.name) || [];
-          
-          await supabase.from('contents').update({
-            type: finalType,
-            platform,
-            genre_names: genreNames,
-            cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-            overview: metadata.overview,
-            poster_path: metadata.poster_path,
-            backdrop_path: metadata.backdrop_path,
-            vote_average: metadata.vote_average,
-            popularity: metadata.popularity || 0,
-            release_date: metadata.release_date || metadata.first_air_date,
-            tv_status: metadata.status
-          }).eq('id', item.id);
-
-          if (tmdbType !== 'movie') {
-            await this.scrapeTVDetails(item.id, item.tmdb_id, logId, summary.items_processed, contents.length, item.title);
+          if (logId) {
+            await this.updateLogProgress(
+              logId,
+              summary.items_processed,
+              contents.length,
+              item.title || "Scanning...",
+            );
           }
-          
-          summary.items_added++;
-        } catch (err: any) {
-          summary.items_failed++;
-        }
-      }, 3, () => this.checkTaskActive(logId));
+
+          try {
+            const tmdbType = item.type === "movie" ? "movie" : "tv";
+            const resMetadata = await this.fetchWithTimeout(
+              `https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`,
+            );
+            const metadata: TMDBMetadata = await resMetadata.json();
+
+            const finalType = classifyContentType(metadata, tmdbType);
+            const platform = classifyPlatform(metadata, finalType);
+            const genreNames = metadata.genres?.map((g) => g.name) || [];
+
+            await supabase
+              .from("contents")
+              .update({
+                type: finalType,
+                platform,
+                genre_names: genreNames,
+                cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+                overview: metadata.overview,
+                poster_path: metadata.poster_path,
+                backdrop_path: metadata.backdrop_path,
+                vote_average: metadata.vote_average,
+                popularity: metadata.popularity || 0,
+                release_date: metadata.release_date || metadata.first_air_date,
+                tv_status: metadata.status,
+              })
+              .eq("id", item.id);
+
+            if (tmdbType !== "movie") {
+              await this.scrapeTVDetails(
+                item.id,
+                item.tmdb_id,
+                logId,
+                summary.items_processed,
+                contents.length,
+                item.title,
+              );
+            }
+
+            summary.items_added++;
+          } catch (err: any) {
+            summary.items_failed++;
+          }
+        },
+        3,
+        () => this.checkTaskActive(logId),
+      );
     }
   }
 
@@ -1013,60 +1455,68 @@ export class ScraperService {
    * Sync Missing Subtitles
    */
   public async syncMissingSubtitles(): Promise<ScrapeTaskSummary> {
-    const taskName = 'Sync Missing Subtitles';
+    const taskName = "Sync Missing Subtitles";
     const logId = await this.createLog(taskName);
-    if (!logId) return { items_processed: 0, items_added: 0, items_failed: 0, errors: ['Task already running'] };
+    if (!logId)
+      return {
+        items_processed: 0,
+        items_added: 0,
+        items_failed: 0,
+        errors: ["Task already running"],
+      };
 
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
 
     try {
-      const { data: contents } = await supabase.from('contents').select('*');
-      
-      if (contents) {
-        await this.pMap(contents, async (item: any) => {
-          summary.items_processed++;
-          
-          if (logId) {
-            await this.updateLogProgress(logId, summary.items_processed, contents.length, item.title || 'Scanning...');
-          }
-
-          try {
-            const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
-            
-            if (result.status === 'success') {
-              summary.items_added++;
-            } else if (result.status === 'error') {
-              summary.items_failed++;
-            }
-
-          } catch (err: any) {
-            summary.items_failed++;
-          }
-        }, 5, () => this.checkTaskActive(logId));
-      }
-      if (logId) await this.updateLog(logId, 'success', summary);
+      let state: Record<string, unknown> = {};
+      do {
+        await this.checkTaskActive(logId);
+        const result = await this.runSyncSubtitlesChunk({ ...state, logId, accumulatedProcessed: summary.items_processed });
+        for (const key of ['items_processed', 'items_added', 'items_failed', 'items_skipped', 'subtitle_id', 'subtitle_en', 'subtitle_missing'] as const) summary[key] = (summary[key] || 0) + (result.summary[key] || 0);
+        summary.errors.push(...result.summary.errors.slice(0, Math.max(0, 20 - summary.errors.length)));
+        if (!result.hasMore) break;
+        if (!result.summary.items_processed) throw new Error('Subtitle sync made no progress');
+        state = result.nextState;
+      } while (true);
+      if (logId) await this.updateLog(logId, "success", summary);
     } catch (err: any) {
-      if (err.message === 'Task Aborted') return summary;
-      if (logId) await this.updateLog(logId, 'failed', summary, err.message);
+      if (err.message === "Task Aborted") return summary;
+      if (logId) await this.updateLog(logId, "failed", summary, err.message);
     }
 
     return summary;
   }
 
-  private async checkVideoAvailability(tmdbId: number, type: 'movie' | 'tv'): Promise<boolean> {
+  private async checkVideoAvailability(
+    tmdbId: number,
+    type: "movie" | "tv",
+  ): Promise<boolean> {
     try {
-      const vidlinkUrl = `https://vidlink.pro/${type}/${tmdbId}${type === 'tv' ? '/1/1' : ''}`;
+      const vidlinkUrl = `https://vidlink.pro/${type}/${tmdbId}${type === "tv" ? "/1/1" : ""}`;
       const vidsrcUrl = `https://vidsrc.net/embed/${type}?tmdb=${tmdbId}`;
 
-      const checkProvider = async (url: string, headers: any): Promise<boolean> => {
+      const checkProvider = async (
+        url: string,
+        headers: any,
+      ): Promise<boolean> => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3500);
         try {
-          const res = await fetch(url, { method: 'HEAD', headers, signal: controller.signal });
+          const res = await fetch(url, {
+            method: "HEAD",
+            headers,
+            signal: controller.signal,
+          });
           clearTimeout(timeoutId);
-          if (res.status === 404 && url.includes('vidsrc')) return Promise.reject(new Error('404 Not Found'));
+          if (res.status === 404 && url.includes("vidsrc"))
+            return Promise.reject(new Error("404 Not Found"));
           if (res.ok || res.status === 403 || res.status === 206) return true;
-          return Promise.reject(new Error('Invalid status'));
+          return Promise.reject(new Error("Invalid status"));
         } catch (e) {
           clearTimeout(timeoutId);
           return Promise.reject(e);
@@ -1074,8 +1524,11 @@ export class ScraperService {
       };
 
       const promises = [
-        checkProvider(vidlinkUrl, { 'Referer': 'https://vidlink.pro/', 'User-Agent': 'Mozilla/5.0' }),
-        checkProvider(vidsrcUrl, { 'User-Agent': 'Mozilla/5.0' })
+        checkProvider(vidlinkUrl, {
+          Referer: "https://vidlink.pro/",
+          "User-Agent": "Mozilla/5.0",
+        }),
+        checkProvider(vidsrcUrl, { "User-Agent": "Mozilla/5.0" }),
       ];
 
       try {
@@ -1083,134 +1536,285 @@ export class ScraperService {
         return true;
       } catch (e) {
         // If both rejected, assume true to avoid skipping valid movies during server hiccups
-        return true; 
+        return true;
       }
     } catch (err) {
-      console.warn(`[Scraper] checkVideoAvailability error for ${tmdbId}, assuming true`);
+      console.warn(
+        `[Scraper] checkVideoAvailability error for ${tmdbId}, assuming true`,
+      );
       return true;
     }
   }
 
-  private async addProviderLinks(contentId: string, type: string, tmdbId: number, scraperConfig: Record<string, any>) {
-    const isTV = type !== 'movie';
+  private async addProviderLinks(
+    contentId: string,
+    type: string,
+    tmdbId: number,
+    scraperConfig: Record<string, any>,
+  ) {
+    const isTV = type !== "movie";
     const providers = [];
 
     // --- Available Servers ---
-    if (scraperConfig.vidlink_enabled !== false) {
-      providers.push({ name: 'VidLink', url: `https://vidlink.pro/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
-    }
-
     if (scraperConfig.moviesapito_enabled !== false) {
-      providers.push({ name: 'MoviesAPI', url: `https://moviesapi.to/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '-1-1' : ''}` });
+      providers.push({
+        name: "MoviesAPI",
+        url: `https://moviesapi.to/${isTV ? "tv" : "movie"}/${tmdbId}${isTV ? "-1-1" : ""}`,
+      });
     }
 
     if (scraperConfig.videasy_enabled !== false) {
-      providers.push({ name: 'Videasy', url: `https://player.videasy.net/${isTV ? 'tv' : 'movie'}/${tmdbId}${isTV ? '/1/1' : ''}` });
+      providers.push({
+        name: "Videasy",
+        url: videasyEmbedUrl(tmdbId, isTV ? "tv" : "movie"),
+      });
     }
 
     if (providers.length > 0) {
-      const embedLinks = providers.map(p => ({
+      const embedLinks = providers.map((p) => ({
         content_id: contentId,
         provider: p.name,
         url: p.url,
-        quality: 'HD'
+        quality: "HD",
       }));
-      await supabase.from('embed_links').upsert(embedLinks, { onConflict: 'content_id,provider' });
+      await supabase
+        .from("embed_links")
+        .upsert(embedLinks, { onConflict: "content_id,provider" });
     }
   }
 
   private async processAndSaveContent(
     item: any,
-    genreType: 'movie' | 'tv',
+    genreType: "movie" | "tv",
     scraperConfig: Record<string, any>,
     options?: {
       logId?: string;
       summary?: ScrapeTaskSummary;
       totalEstimated?: number;
       skipDeepScrapeTV?: boolean;
-    }
+    },
   ): Promise<boolean> {
-    const { data: existing } = await supabase
-      .from('contents')
-      .select('id, status, updated_at')
-      .eq('tmdb_id', item.id)
-      .single();
+    try {
+      const { data: existing } = await supabase
+        .from("contents")
+        .select("id, status, updated_at")
+        .eq("tmdb_id", item.id)
+        .single();
 
-    if (existing && genreType === 'movie') return false;
+      if (existing && genreType === "movie") return false;
 
-    // Check if item was updated in the last 24h to avoid redundant deep scrapes
-    if (existing && existing.updated_at) {
-      const lastUpdate = new Date(existing.updated_at).getTime();
-      const now = new Date().getTime();
-      if (now - lastUpdate < 24 * 60 * 60 * 1000) {
-         return false;
+      // Check if item was updated in the last 24h to avoid redundant deep scrapes
+      if (existing && existing.updated_at) {
+        const lastUpdate = new Date(existing.updated_at).getTime();
+        const now = new Date().getTime();
+        if (now - lastUpdate < 24 * 60 * 60 * 1000) {
+          return false;
+        }
       }
-    }
 
-    const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${genreType}/${item.id}?api_key=${tmdbApiKey}&append_to_response=credits`);
-    if (!resMetadata.ok) throw new Error(`TMDB Metadata fetch failed with status ${resMetadata.status}`);
-    const metadata: any = await resMetadata.json();
-    
-    const finalType = classifyContentType(metadata, genreType);
-    
-    // VERIFY VIDEO EXISTS BEFORE SAVING
-    const isAvailable = await this.checkVideoAvailability(item.id, genreType);
-    if (!isAvailable) {
-       console.log(`[Scraper] Video not available for ${item.title || item.name}, skipping.`);
-       return false;
-    }
+      // MULTI-LANGUAGE FALLBACK (ID -> EN)
+      let resMetadata = await this.fetchWithTimeout(
+        `https://api.themoviedb.org/3/${genreType}/${item.id}?api_key=${tmdbApiKey}&language=id-ID&append_to_response=credits,videos`,
+      );
+      
+      if (resMetadata.status === 404) {
+        console.warn(`[Scraper] Content ${item.id} not found on TMDB. Skipping.`);
+        return false;
+      }
 
-    const platform = classifyPlatform(metadata, finalType);
-    const genreNames = metadata.genres?.map((g: { name: string }) => g.name) || [];
+      if (!resMetadata.ok) {
+        throw new Error(`TMDB ID fetch failed: ${resMetadata.status}`);
+      }
+
+      let metadata: any = await resMetadata.json();
+
+      // If overview is missing in Indonesian, fetch in English
+      if (!metadata.overview || metadata.overview.length < 5) {
+        const enRes = await this.fetchWithTimeout(
+          `https://api.themoviedb.org/3/${genreType}/${item.id}?api_key=${tmdbApiKey}&language=en-US&append_to_response=credits,videos`,
+        );
+        if (enRes.ok) {
+          const enMetadata = await enRes.json();
+          metadata.overview = enMetadata.overview || metadata.overview;
+          metadata.title = metadata.title || enMetadata.title;
+          metadata.name = metadata.name || enMetadata.name;
+          // Use English videos if Indonesian videos are missing
+          if (!metadata.videos?.results?.length) {
+            metadata.videos = enMetadata.videos;
+          }
+        }
+      }
+
+      // TRAILER EXTRACTION
+      const trailer = metadata.videos?.results?.find(
+        (v: any) => v.type === "Trailer" && v.site === "YouTube"
+      ) || metadata.videos?.results?.find(
+        (v: any) => v.site === "YouTube"
+      );
+      const trailerKey = trailer?.key;
+
+      const finalType = classifyContentType(metadata, genreType);
+
+      // VERIFY VIDEO EXISTS BEFORE SAVING
+      const isAvailable = await this.checkVideoAvailability(item.id, genreType);
+      if (!isAvailable) {
+        console.log(
+          `[Scraper] Video not available for ${item.title || item.name}, skipping.`,
+        );
+        return false;
+      }
+
+      const platform = classifyPlatform(metadata, finalType);
+      const genreNames =
+        metadata.genres?.map((g: { name: string }) => g.name) || [];
+
+      const { data: dbItem, error: upsertError } = await supabase
+        .from("contents")
+        .upsert(
+          {
+            tmdb_id: item.id,
+            title: item.title || item.name,
+            type: finalType,
+            ...(existing
+              ? {}
+              : { status: scraperConfig.auto_approve ? "approved" : "pending" }),
+            platform,
+            cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+            genre_names: genreNames,
+            overview: metadata.overview,
+            poster_path: metadata.poster_path,
+            backdrop_path: metadata.backdrop_path,
+            trailer_key: trailerKey,
+            vote_average: metadata.vote_average,
+            popularity: item.popularity || metadata.popularity || 0,
+            release_date: metadata.release_date || metadata.first_air_date,
+            tv_status: metadata.status,
+            is_healthy: true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "tmdb_id" },
+        )
+        .select()
+        .single();
+
+      if (upsertError) throw upsertError;
+
+      await this.addProviderLinks(dbItem.id, genreType, item.id, scraperConfig);
+
+      // SMART TV SYNC
+      if (
+        genreType === "tv" &&
+        options?.logId &&
+        options?.summary &&
+        options?.totalEstimated &&
+        !options?.skipDeepScrapeTV
+      ) {
+        const isEnded = metadata.status === "Ended" || metadata.status === "Canceled";
+        if (existing && isEnded) {
+          console.log(`[Scraper] Skipping deep scrape for ended TV show: ${item.name}`);
+        } else {
+          await this.scrapeTVDetails(
+            dbItem.id,
+            item.id,
+            options.logId,
+            options.summary.items_processed,
+            options.totalEstimated,
+            item.title || item.name,
+          );
+        }
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error(`[Scraper] Error processing ${item.id}:`, error.message);
+      if (options?.summary) {
+        options.summary.items_failed++;
+        options.summary.errors.push(`${item.title || item.id}: ${error.message}`);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Manually sync or fix content metadata using a specific TMDB ID
+   */
+  public async syncSpecificContent(contentId: string, tmdbId: number, type: 'movie' | 'tv') {
+    const scraperConfig = await this.getScraperConfig();
     
-    const { data: dbItem, error: upsertError } = await supabase
-      .from('contents')
-      .upsert({
-        tmdb_id: item.id,
-        title: item.title || item.name,
+    // Fetch fresh metadata
+    const res = await this.fetchWithTimeout(
+      `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${tmdbApiKey}&language=id-ID&append_to_response=credits,videos`
+    );
+    
+    if (!res.ok) throw new Error("Failed to fetch metadata from TMDB");
+    const metadata = await res.json();
+    
+    const finalType = classifyContentType(metadata, type);
+    const trailer = metadata.videos?.results?.find((v: any) => v.type === "Trailer" && v.site === "YouTube") || 
+                    metadata.videos?.results?.find((v: any) => v.site === "YouTube");
+
+    const { error } = await supabase
+      .from("contents")
+      .update({
+        tmdb_id: tmdbId,
+        title: metadata.title || metadata.name,
         type: finalType,
-        ...(existing ? {} : { status: scraperConfig.auto_approve ? 'approved' : 'pending' }),
-        platform,
-        cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-        genre_names: genreNames,
         overview: metadata.overview,
         poster_path: metadata.poster_path,
         backdrop_path: metadata.backdrop_path,
         vote_average: metadata.vote_average,
-        popularity: item.popularity || metadata.popularity || 0,
         release_date: metadata.release_date || metadata.first_air_date,
-        tv_status: metadata.status,
-        is_healthy: true,
+        popularity: metadata.popularity,
+        genre_names: metadata.genres?.map((g: any) => g.name) || [],
+        cast_data: metadata.credits?.cast?.slice(0, 10) || [],
+        trailer_key: trailer?.key,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'tmdb_id' })
-      .select().single();
+      })
+      .eq("id", contentId);
 
-    if (upsertError) throw upsertError;
+    if (error) throw error;
     
-    await this.addProviderLinks(dbItem.id, genreType, item.id, scraperConfig);
+    // Re-verify embed links with new TMDB ID
+    await this.addProviderLinks(contentId, type, tmdbId, scraperConfig);
     
-    // Optionally fetch TV Details if requested and available
-    if (genreType === 'tv' && options?.logId && options?.summary && options?.totalEstimated && !options?.skipDeepScrapeTV) {
-      await this.scrapeTVDetails(dbItem.id, item.id, options.logId, options.summary.items_processed, options.totalEstimated, item.title || item.name);
-    }
-    
-    return true;
+    return { success: true, title: metadata.title || metadata.name };
   }
 
   // ==========================================
   // CHUNKED EXECUTION FOR SERVERLESS (VERCEL)
   // ==========================================
 
-  public async runNetflixDiscoveryChunk(pagesPerType: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runNetflixDiscoveryChunk(
+    pagesPerType: number = 3,
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
     const scraperConfig = await this.getScraperConfig();
-    
-    let allTasks = state.tasks as Array<{ type: string; url: string }> | undefined;
+
+    let allTasks = state.tasks as
+      | Array<{ type: string; url: string }>
+      | undefined;
     if (!allTasks) {
       allTasks = [
-        { type: 'tv', url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc` },
-        { type: 'movie', url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc` }
+        {
+          type: "tv",
+          url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=213&sort_by=popularity.desc&region=ID&watch_region=ID`,
+        },
+        {
+          type: "movie",
+          url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=8&watch_region=ID&sort_by=popularity.desc&region=ID`,
+        },
       ];
     }
 
@@ -1223,38 +1827,62 @@ export class ScraperService {
     }
 
     const task = allTasks[currentTaskIndex];
-    console.log(`[Chunk] Netflix Priority: ${task.type.toUpperCase()} | Page ${currentPage}`);
+    console.log(
+      `[Chunk] Netflix Priority: ${task.type.toUpperCase()} | Page ${currentPage}`,
+    );
 
     const res = await this.fetchWithTimeout(`${task.url}&page=${currentPage}`);
     const data = await res.json();
 
     if (data.results && data.results.length > 0) {
       const CHUNK_SIZE = 3;
-      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
-      
+      const resultsToProcess = data.results.slice(
+        currentItemIndex,
+        currentItemIndex + CHUNK_SIZE,
+      );
+
       const tmdbIds = resultsToProcess.map((i: any) => i.id);
-      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
-      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+      const { data: existingRecords } = await supabase
+        .from("contents")
+        .select("tmdb_id")
+        .in("tmdb_id", tmdbIds);
+      const existingIds = new Set(
+        existingRecords?.map((r: any) => r.tmdb_id) || [],
+      );
 
       for (const item of resultsToProcess) {
         if (this.isChunkTimedOut()) {
-          console.log(`[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`);
+          console.log(
+            `[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`,
+          );
           break;
         }
 
         summary.items_processed++;
         if (state.logId) {
           const totalEstimated = allTasks.length * pagesPerType * 20;
-          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || 'Scanning Netflix...');
+          const currentTotalProcessed =
+            ((state.accumulatedProcessed as number) || 0) +
+            summary.items_processed;
+          await this.updateLogProgress(
+            state.logId as string,
+            currentTotalProcessed,
+            totalEstimated,
+            item.title || item.name || "Scanning Netflix...",
+          );
         }
-        
-        if (existingIds.has(item.id) && task.type === 'movie') continue;
+
+        if (existingIds.has(item.id) && task.type === "movie") continue;
 
         try {
-          const saved = await this.processAndSaveContent(item, task.type as 'movie' | 'tv', scraperConfig, {
-            skipDeepScrapeTV: true
-          });
+          const saved = await this.processAndSaveContent(
+            item,
+            task.type as "movie" | "tv",
+            scraperConfig,
+            {
+              skipDeepScrapeTV: true,
+            },
+          );
           if (saved) summary.items_added++;
         } catch {
           summary.items_failed++;
@@ -1268,7 +1896,11 @@ export class ScraperService {
     if (nextItemIndex >= (data.results?.length || 0)) {
       nextItemIndex = 0;
       currentPage = currentPage + 1;
-      if (currentPage > pagesPerType || !data.results || data.results.length === 0) {
+      if (
+        currentPage > pagesPerType ||
+        !data.results ||
+        data.results.length === 0
+      ) {
         currentTaskIndex++;
         currentPage = 1;
       }
@@ -1281,28 +1913,61 @@ export class ScraperService {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { tasks: allTasks, currentTaskIndex, currentPage, currentItemIndex: nextItemIndex } : {}
+      nextState: hasMore
+        ? {
+            tasks: allTasks,
+            currentTaskIndex,
+            currentPage,
+            currentItemIndex: nextItemIndex,
+          }
+        : {},
     };
   }
 
-  public async runDiscoveryChunk(pagesPerGenre: number = 3, state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runDiscoveryChunk(
+    pagesPerGenre: number = 3,
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
     const scraperConfig = await this.getScraperConfig();
-    
+
     // Fetch genres if not in state
-    let allTasks = state.genres as Array<{ id: number; name: string; type: string }> | undefined;
+    let allTasks = state.genres as
+      | Array<{ id: number; name: string; type: string }>
+      | undefined;
     if (!allTasks) {
-      const movieGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`);
-      const tvGenreRes = await this.fetchWithTimeout(`https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`);
+      const movieGenreRes = await this.fetchWithTimeout(
+        `https://api.themoviedb.org/3/genre/movie/list?api_key=${tmdbApiKey}`,
+      );
+      const tvGenreRes = await this.fetchWithTimeout(
+        `https://api.themoviedb.org/3/genre/tv/list?api_key=${tmdbApiKey}`,
+      );
       const { genres: movieGenres } = await movieGenreRes.json();
       const { genres: tvGenres } = await tvGenreRes.json();
-      
-      if (!movieGenres || !tvGenres) throw new Error("Failed to fetch genres from TMDB");
-      
+
+      if (!movieGenres || !tvGenres)
+        throw new Error("Failed to fetch genres from TMDB");
+
       allTasks = [
-        ...movieGenres.map((g: { id: number; name: string }) => ({ ...g, type: 'movie' })),
-        ...tvGenres.map((g: { id: number; name: string }) => ({ ...g, type: 'tv' }))
+        ...movieGenres.map((g: { id: number; name: string }) => ({
+          ...g,
+          type: "movie",
+        })),
+        ...tvGenres.map((g: { id: number; name: string }) => ({
+          ...g,
+          type: "tv",
+        })),
       ];
     }
 
@@ -1315,7 +1980,9 @@ export class ScraperService {
     }
 
     const genre = allTasks[currentGenreIndex];
-    console.log(`[Chunk] Scraping Genre: ${genre.name} (${genre.type}) | Page ${currentPage}`);
+    console.log(
+      `[Chunk] Scraping Genre: ${genre.name} (${genre.type}) | Page ${currentPage}`,
+    );
 
     const url = `https://api.themoviedb.org/3/discover/${genre.type}?api_key=${tmdbApiKey}&with_genres=${genre.id}&sort_by=popularity.desc&page=${currentPage}`;
     const res = await this.fetchWithTimeout(url);
@@ -1324,32 +1991,54 @@ export class ScraperService {
     if (data.results && data.results.length > 0) {
       // Process up to 3 items per chunk (no subtitles/TV deep scrape = much faster)
       const CHUNK_SIZE = 3;
-      const resultsToProcess = data.results.slice(currentItemIndex, currentItemIndex + CHUNK_SIZE);
-      
+      const resultsToProcess = data.results.slice(
+        currentItemIndex,
+        currentItemIndex + CHUNK_SIZE,
+      );
+
       const tmdbIds = resultsToProcess.map((i: any) => i.id);
-      const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
-      const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+      const { data: existingRecords } = await supabase
+        .from("contents")
+        .select("tmdb_id")
+        .in("tmdb_id", tmdbIds);
+      const existingIds = new Set(
+        existingRecords?.map((r: any) => r.tmdb_id) || [],
+      );
 
       for (const item of resultsToProcess) {
         // Timeout guard — stop before Vercel kills us
         if (this.isChunkTimedOut()) {
-          console.log(`[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`);
+          console.log(
+            `[Chunk] Timeout guard triggered after ${summary.items_processed} items. Yielding...`,
+          );
           break;
         }
 
         summary.items_processed++;
         if (state.logId) {
           const totalEstimated = allTasks.length * pagesPerGenre * 20;
-          const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-          await this.updateLogProgress(state.logId as string, currentTotalProcessed, totalEstimated, item.title || item.name || 'Scanning...');
+          const currentTotalProcessed =
+            ((state.accumulatedProcessed as number) || 0) +
+            summary.items_processed;
+          await this.updateLogProgress(
+            state.logId as string,
+            currentTotalProcessed,
+            totalEstimated,
+            item.title || item.name || "Scanning...",
+          );
         }
-        
-        if (existingIds.has(item.id) && genre.type === 'movie') continue;
+
+        if (existingIds.has(item.id) && genre.type === "movie") continue;
 
         try {
-          const saved = await this.processAndSaveContent(item, genre.type as any, scraperConfig, {
-            skipDeepScrapeTV: true
-          });
+          const saved = await this.processAndSaveContent(
+            item,
+            genre.type as any,
+            scraperConfig,
+            {
+              skipDeepScrapeTV: true,
+            },
+          );
           if (saved) summary.items_added++;
         } catch {
           summary.items_failed++;
@@ -1364,7 +2053,11 @@ export class ScraperService {
     if (nextItemIndex >= (data.results?.length || 0)) {
       nextItemIndex = 0;
       currentPage = currentPage + 1;
-      if (currentPage > pagesPerGenre || !data.results || data.results.length === 0) {
+      if (
+        currentPage > pagesPerGenre ||
+        !data.results ||
+        data.results.length === 0
+      ) {
         currentGenreIndex++;
         currentPage = 1;
       }
@@ -1377,22 +2070,46 @@ export class ScraperService {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { genres: allTasks, currentGenreIndex, currentPage, currentItemIndex: nextItemIndex } : {}
+      nextState: hasMore
+        ? {
+            genres: allTasks,
+            currentGenreIndex,
+            currentPage,
+            currentItemIndex: nextItemIndex,
+          }
+        : {},
     };
   }
 
-  public async runTrendingChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runTrendingChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
     const scraperConfig = await this.getScraperConfig();
-    
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let items: any[] = (state.items as any[]) || [];
     if (items.length === 0) {
-      const res = await this.fetchWithTimeout(`https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`);
+      const res = await this.fetchWithTimeout(
+        `https://api.themoviedb.org/3/trending/all/week?api_key=${tmdbApiKey}`,
+      );
       const data = await res.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      items = data.results?.filter((i: any) => i.media_type === 'movie' || i.media_type === 'tv') || [];
+      items =
+        data.results?.filter(
+          (i: any) => i.media_type === "movie" || i.media_type === "tv",
+        ) || [];
     }
 
     const offset = (state.offset as number) || 0;
@@ -1404,8 +2121,13 @@ export class ScraperService {
     }
 
     const tmdbIds = chunk.map((i: any) => i.id);
-    const { data: existingRecords } = await supabase.from('contents').select('tmdb_id').in('tmdb_id', tmdbIds);
-    const existingIds = new Set(existingRecords?.map((r: any) => r.tmdb_id) || []);
+    const { data: existingRecords } = await supabase
+      .from("contents")
+      .select("tmdb_id")
+      .in("tmdb_id", tmdbIds);
+    const existingIds = new Set(
+      existingRecords?.map((r: any) => r.tmdb_id) || [],
+    );
 
     for (const item of chunk) {
       if (this.isChunkTimedOut()) {
@@ -1415,16 +2137,28 @@ export class ScraperService {
 
       summary.items_processed++;
       if (state.logId) {
-        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-        await this.updateLogProgress(state.logId as string, currentTotalProcessed, items.length, item.title || item.name || 'Scanning...');
+        const currentTotalProcessed =
+          ((state.accumulatedProcessed as number) || 0) +
+          summary.items_processed;
+        await this.updateLogProgress(
+          state.logId as string,
+          currentTotalProcessed,
+          items.length,
+          item.title || item.name || "Scanning...",
+        );
       }
-      
-      if (existingIds.has(item.id) && item.media_type === 'movie') continue;
+
+      if (existingIds.has(item.id) && item.media_type === "movie") continue;
 
       try {
-        const saved = await this.processAndSaveContent(item, item.media_type as 'movie' | 'tv', scraperConfig, {
-            skipDeepScrapeTV: true
-        });
+        const saved = await this.processAndSaveContent(
+          item,
+          item.media_type as "movie" | "tv",
+          scraperConfig,
+          {
+            skipDeepScrapeTV: true,
+          },
+        );
         if (saved) summary.items_added++;
       } catch {
         summary.items_failed++;
@@ -1440,18 +2174,113 @@ export class ScraperService {
       summary,
       hasMore,
       total,
-      nextState: hasMore ? { items, offset: nextOffset } : {}
+      nextState: hasMore ? { items, offset: nextOffset } : {},
     };
   }
 
-  public async runHealthCheckChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runNewReleasesChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+    const scraperConfig = await this.getScraperConfig();
+
+    const tasks = [
+      { type: "movie", endpoint: "now_playing" },
+      { type: "tv", endpoint: "on_the_air" },
+    ];
+
+    let currentTaskIndex = (state.currentTaskIndex as number) || 0;
+    let currentPage = (state.currentPage as number) || 1;
+    let currentItemIndex = (state.currentItemIndex as number) || 0;
+
+    if (currentTaskIndex >= tasks.length) {
+      return { summary, hasMore: false, total: 0, nextState: {} };
+    }
+
+    const task = tasks[currentTaskIndex];
+    const res = await this.fetchWithTimeout(
+      `https://api.themoviedb.org/3/${task.type}/${task.endpoint}?api_key=${tmdbApiKey}&language=id-ID&page=${currentPage}&region=ID`,
+    );
+    const data = await res.json();
+    const items = data.results || [];
+
+    for (let i = currentItemIndex; i < items.length; i++) {
+      if (this.isChunkTimedOut()) {
+        return {
+          summary,
+          hasMore: true,
+          total: tasks.length * 20,
+          nextState: { ...state, currentTaskIndex, currentPage, currentItemIndex: i },
+        };
+      }
+
+      summary.items_processed++;
+      if (state.logId) {
+        await this.updateLogProgress(
+          state.logId as string,
+          ((state.accumulatedProcessed as number) || 0) + summary.items_processed,
+          tasks.length * 20,
+          items[i].title || items[i].name || "Scanning...",
+        );
+      }
+
+      const success = await this.processAndSaveContent(items[i], task.type as any, scraperConfig, {
+        logId: state.logId as string,
+        summary,
+        totalEstimated: tasks.length * 20,
+      });
+      if (success) summary.items_added++;
+    }
+
+    // Move to next page or task
+    currentPage++;
+    if (currentPage > 2 || currentPage > (data.total_pages || 0)) {
+      currentPage = 1;
+      currentTaskIndex++;
+    }
+
+    const hasMore = currentTaskIndex < tasks.length;
+    return {
+      summary,
+      hasMore,
+      total: tasks.length * 20 * 2,
+      nextState: hasMore ? { ...state, currentTaskIndex, currentPage, currentItemIndex: 0 } : {},
+    };
+  }
+
+  public async runHealthCheckChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
+    this.chunkStartTime = Date.now();
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let links: any[] = (state.links as any[]) || [];
     if (links.length === 0) {
-      const { data } = await supabase.from('embed_links').select('id, url, content_id');
+      const { data } = await supabase
+        .from("embed_links")
+        .select("id, url, content_id");
       links = data || [];
     }
 
@@ -1459,7 +2288,8 @@ export class ScraperService {
     const chunkSize = 10;
     const chunk = links.slice(offset, offset + chunkSize);
 
-    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+    if (chunk.length === 0)
+      return { summary, hasMore: false, total: 0, nextState: {} };
 
     for (const link of chunk) {
       if (this.isChunkTimedOut()) {
@@ -1469,16 +2299,45 @@ export class ScraperService {
 
       summary.items_processed++;
       if (state.logId) {
-        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-        await this.updateLogProgress(state.logId as string, currentTotalProcessed, links.length, link.url || 'Scanning...');
+        const currentTotalProcessed =
+          ((state.accumulatedProcessed as number) || 0) +
+          summary.items_processed;
+        await this.updateLogProgress(
+          state.logId as string,
+          currentTotalProcessed,
+          links.length,
+          link.url || "Scanning...",
+        );
       }
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000); 
-        const res = await fetch(link.url, { method: 'GET', signal: controller.signal, headers: { 'Range': 'bytes=0-0' } });
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(link.url, {
+          method: "GET",
+          signal: controller.signal,
+          headers: { Range: "bytes=0-0" },
+        });
         clearTimeout(timeout);
-        const isHealthy = res.ok || res.status === 403 || res.status === 206; 
-        await supabase.from('contents').update({ is_healthy: isHealthy, last_checked_at: new Date().toISOString() }).eq('id', link.content_id);
+        const isHealthy = res.ok || res.status === 403 || res.status === 206;
+        
+        // Also check Image Health if it's the first link we're checking for this content
+        let imgHealthy = true;
+        const { data: content } = await supabase.from("contents").select("poster_path").eq("id", link.content_id).single();
+        if (content?.poster_path) {
+           const imgRes = await fetch(`https://image.tmdb.org/t/p/w92${content.poster_path}`, { method: "HEAD" });
+           if (imgRes.status === 404) imgHealthy = false;
+        }
+
+        await supabase
+          .from("contents")
+          .update({
+            is_healthy: isHealthy && imgHealthy,
+            last_checked_at: new Date().toISOString(),
+          })
+          .eq("id", link.content_id);
+          
+        if (isHealthy && imgHealthy) summary.items_added++;
+        else summary.items_failed++;
       } catch {
         summary.items_failed++;
       }
@@ -1488,17 +2347,41 @@ export class ScraperService {
     const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < links.length;
     const total = links.length;
-    return { summary, hasMore, total, nextState: hasMore ? { links, offset: nextOffset } : {} };
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { links, offset: nextOffset } : {},
+    };
   }
 
-  public async runSyncMetadataChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runSyncMetadataChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let contents = state.contents as any[] | undefined;
     if (!contents) {
-      const { data } = await supabase.from('contents').select('id, tmdb_id, type');
+      // Sync items that haven't been updated for 3 days, prioritized by oldest update
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const { data } = await supabase
+        .from("contents")
+        .select("id, tmdb_id, type")
+        .lt("updated_at", threeDaysAgo)
+        .order("updated_at", { ascending: true })
+        .limit(100); // Only queue 100 items per routine cycle to avoid memory issues
       contents = data || [];
     }
 
@@ -1506,44 +2389,71 @@ export class ScraperService {
     const chunkSize = 3;
     const chunk = contents.slice(offset, offset + chunkSize);
 
-    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+    if (chunk.length === 0)
+      return { summary, hasMore: false, total: 0, nextState: {} };
 
     for (const item of chunk) {
       if (this.isChunkTimedOut()) {
-        console.log(`[Chunk] SyncMetadata timeout guard triggered. Yielding...`);
+        console.log(
+          `[Chunk] SyncMetadata timeout guard triggered. Yielding...`,
+        );
         break;
       }
 
       summary.items_processed++;
       if (state.logId) {
-        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-        await this.updateLogProgress(state.logId as string, currentTotalProcessed, contents.length, item.tmdb_id || 'Scanning...');
+        const currentTotalProcessed =
+          ((state.accumulatedProcessed as number) || 0) +
+          summary.items_processed;
+        await this.updateLogProgress(
+          state.logId as string,
+          currentTotalProcessed,
+          contents.length,
+          item.tmdb_id || "Scanning...",
+        );
       }
       try {
-        const tmdbType = item.type === 'movie' ? 'movie' : 'tv';
-        const resMetadata = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&append_to_response=credits`);
+        const tmdbType = item.type === "movie" ? "movie" : "tv";
+        const resMetadata = await this.fetchWithTimeout(
+          `https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&language=id-ID&append_to_response=credits`,
+        );
+        if (!resMetadata.ok) throw new Error(`TMDB metadata failed: ${resMetadata.status}`);
         const metadata = await resMetadata.json();
-        
+        if (Number(metadata.id) !== Number(item.tmdb_id)) throw new Error('TMDB metadata ID mismatch');
+        if (!metadata.overview) {
+          const english = await this.fetchWithTimeout(`https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}&language=en-US&append_to_response=credits`);
+          if (english.ok) metadata.overview = (await english.json()).overview || metadata.overview;
+        }
+
         const finalType = classifyContentType(metadata, tmdbType);
         const platform = classifyPlatform(metadata, finalType);
 
-        await supabase.from('contents').update({
-          type: finalType,
-          platform,
-          genre_names: metadata.genres?.map((g: { name: string }) => g.name) || [],
-          cast_data: metadata.credits?.cast?.slice(0, 10) || [],
-          overview: metadata.overview,
-          poster_path: metadata.poster_path,
-          backdrop_path: metadata.backdrop_path,
-          vote_average: metadata.vote_average,
-          release_date: metadata.release_date || metadata.first_air_date,
-          tv_status: metadata.status
-        }).eq('id', item.id);
+        const changes: Record<string, unknown> = {
+          type: finalType, platform,
+          genre_names: metadata.genres?.map((g: { name: string }) => g.name),
+          cast_data: metadata.credits?.cast?.slice(0, 10),
+          overview: metadata.overview, poster_path: metadata.poster_path,
+          backdrop_path: metadata.backdrop_path, vote_average: metadata.vote_average,
+          release_date: metadata.release_date || metadata.first_air_date, tv_status: metadata.status,
+        };
+        if (state.fillMissingOnly === true) {
+          const { data: current, error } = await supabase.from('contents').select('overview,poster_path,backdrop_path').eq('id', item.id).single();
+          if (error || !current) throw new Error('Current metadata cannot be read');
+          for (const key of Object.keys(changes)) if (!['overview', 'poster_path', 'backdrop_path'].includes(key) || current[key as keyof typeof current]) delete changes[key];
+        }
+        for (const key of Object.keys(changes)) if (changes[key] === undefined || changes[key] === null || changes[key] === '') delete changes[key];
+        if (!Object.keys(changes).length) { summary.items_skipped = (summary.items_skipped || 0) + 1; continue; }
+        const { data: updated, error: updateError } = await supabase
+          .from("contents")
+          .update(changes)
+          .eq("id", item.id).select('id');
+        if (updateError || !updated?.length) throw new Error(updateError?.message || 'Metadata update was not applied');
 
         // TV details removed from sync chunk — too heavy for Vercel serverless
         summary.items_added++;
-      } catch {
+      } catch (error) {
         summary.items_failed++;
+        if (summary.errors.length < 20) summary.errors.push(`${item.tmdb_id}: ${error instanceof Error ? error.message : 'Metadata sync failed'}`);
       }
     }
 
@@ -1551,50 +2461,333 @@ export class ScraperService {
     const nextOffset = offset + actualProcessed;
     const hasMore = nextOffset < contents.length;
     const total = contents.length;
-    return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { contents, offset: nextOffset, fillMissingOnly: state.fillMissingOnly === true } : {},
+    };
   }
 
-  public async runSyncSubtitlesChunk(state: Record<string, unknown> = {}): Promise<{ summary: ScrapeTaskSummary, hasMore: boolean, total: number, nextState: Record<string, unknown> }> {
+  public async runSyncSubtitlesChunk(
+    state: Record<string, unknown> = {},
+  ): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    total: number;
+    nextState: Record<string, unknown>;
+  }> {
     this.chunkStartTime = Date.now();
-    const summary: ScrapeTaskSummary = { items_processed: 0, items_added: 0, items_failed: 0, errors: [] };
-    
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let contents = state.contents as any[] | undefined;
-    if (!contents) {
-      const { data } = await supabase.from('contents').select('tmdb_id, type');
-      contents = data || [];
-    }
+    const summary: ScrapeTaskSummary = {
+      items_processed: 0,
+      items_added: 0,
+      items_failed: 0,
+      errors: [],
+    };
 
     const offset = (state.offset as number) || 0;
     const chunkSize = 3; // Reduced from 5 — subtitles are slow (up to 4 API calls each)
-    const chunk = contents.slice(offset, offset + chunkSize);
+    type Target = { id?: string; tmdb_id: number; type: string; title?: string; season?: number; episode?: number };
+    const supplied = state.contents as Target[] | undefined;
+    let total = supplied?.length || 0;
+    let chunk: Target[];
+    if (supplied) chunk = supplied.slice(offset, offset + chunkSize);
+    else {
+      const { data, count, error } = await supabase.from('contents').select('id,tmdb_id,type,title', { count: 'exact' }).eq('status', 'approved').order('id', { ascending: true }).range(offset, offset + chunkSize - 1);
+      if (error) throw error;
+      chunk = data || []; total = count || 0;
+    }
 
-    if (chunk.length === 0) return { summary, hasMore: false, total: 0, nextState: {} };
+    if (chunk.length === 0)
+      return { summary, hasMore: false, total: 0, nextState: {} };
 
     for (const item of chunk) {
       if (this.isChunkTimedOut()) {
-        console.log(`[Chunk] SyncSubtitles timeout guard triggered. Yielding...`);
+        console.log(
+          `[Chunk] SyncSubtitles timeout guard triggered. Yielding...`,
+        );
         break;
       }
 
       summary.items_processed++;
       if (state.logId) {
-        const currentTotalProcessed = ((state.accumulatedProcessed as number) || 0) + summary.items_processed;
-        await this.updateLogProgress(state.logId as string, currentTotalProcessed, contents.length, item.tmdb_id || 'Scanning...');
+        const currentTotalProcessed =
+          ((state.accumulatedProcessed as number) || 0) +
+          summary.items_processed;
+        await this.updateLogProgress(
+          state.logId as string,
+          currentTotalProcessed,
+          total,
+          item.title || String(item.tmdb_id),
+        );
       }
       try {
-        const result = await SubtitleService.fetchAndUploadSubtitle(item.tmdb_id, item.type === 'movie' ? 'movie' : 'tv');
-        if (result.status === 'success') summary.items_added++;
-        else summary.items_failed++;
-      } catch {
+        let season = item.season;
+        let episode = item.episode;
+        if (item.type !== 'movie' && (!season || !episode)) {
+          if (!item.id) throw new Error('Series subtitle target requires a content ID or explicit season/episode');
+          const { data: aired, error } = await supabase.from('episodes').select('episode_number,seasons!inner(season_number,content_id)').eq('seasons.content_id', item.id).gt('seasons.season_number', 0).lte('air_date', new Date().toISOString().slice(0, 10)).order('air_date', { ascending: false }).limit(1).maybeSingle();
+          if (error) throw error;
+          const selectedSeason = Array.isArray(aired?.seasons) ? aired.seasons[0] : aired?.seasons;
+          season = selectedSeason?.season_number; episode = aired?.episode_number;
+          if (!season || !episode) { summary.items_skipped = (summary.items_skipped || 0) + 1; continue; }
+        }
+        const result = await SubtitleService.fetchAndUploadSubtitle(
+          item.tmdb_id,
+          item.type === "movie" ? "movie" : "tv",
+          season ? String(season) : undefined,
+          episode ? String(episode) : undefined,
+        );
+        if (result.status === "success") summary.items_added++;
+        else if (result.status === 'skipped' && result.url) summary.items_skipped = (summary.items_skipped || 0) + 1;
+        else { summary.items_failed++; if (summary.errors.length < 20) summary.errors.push(`${item.tmdb_id}: ${result.reason || 'Subtitle unavailable'}`); }
+        if (result.language === 'id') summary.subtitle_id = (summary.subtitle_id || 0) + 1;
+        else if (result.language === 'en') summary.subtitle_en = (summary.subtitle_en || 0) + 1;
+        else summary.subtitle_missing = (summary.subtitle_missing || 0) + 1;
+      } catch (error) {
         summary.items_failed++;
+        if (summary.errors.length < 20) summary.errors.push(`${item.tmdb_id}: ${error instanceof Error ? error.message : 'Subtitle sync failed'}`);
       }
     }
 
     const actualProcessed = summary.items_processed;
     const nextOffset = offset + actualProcessed;
-    const hasMore = nextOffset < contents.length;
-    const total = contents.length;
-    return { summary, hasMore, total, nextState: hasMore ? { contents, offset: nextOffset } : {} };
+    const hasMore = chunk.length > 0 && nextOffset < total;
+    return {
+      summary,
+      hasMore,
+      total,
+      nextState: hasMore ? { ...(supplied ? { contents: supplied } : {}), offset: nextOffset } : {},
+    };
+  }
+
+  /**
+   * Automated Multi-Stage Routine for Production
+   * Cycles through different tasks in chunks to stay within serverless limits.
+   */
+  public async runAutomatedRoutineChunk(): Promise<{
+    summary: ScrapeTaskSummary;
+    hasMore: boolean;
+    stage: string;
+  }> {
+    // Basic Concurrency Lock to avoid overlapping runs
+    const { data: lock } = await supabase.from("settings").select("value").eq("key", "scraper_lock").single();
+    if (lock?.value?.active && (Date.now() - new Date(lock.value.last_seen).getTime()) < 60000) {
+       console.log("[AutomatedScraper] Another instance is active. Skipping.");
+       return { summary: { items_processed: 0, items_added: 0, items_failed: 0, errors: [] }, hasMore: false, stage: "locked" };
+    }
+    await supabase.from("settings").upsert({ key: "scraper_lock", value: { active: true, last_seen: new Date().toISOString() } });
+
+    const state = await this.getAutomationState();
+    const stages = [
+      "platform_popular",
+      "platform_latest",
+      "global_trending",
+      "new_releases",
+      "genre_discovery",
+      "metadata_sync",
+      "health_check",
+    ];
+
+    let currentStage = state.stage || stages[0];
+    let stageIndex = stages.indexOf(currentStage);
+
+    if (stageIndex === -1) {
+      currentStage = stages[0];
+      stageIndex = 0;
+    }
+
+    // --- LOGGING ---
+    let logId = state.logId;
+    if (!logId) {
+      logId = await this.createLog("Automated Scraper Routine");
+    }
+    // ----------------
+
+    console.log(`[AutomatedScraper] Stage: ${currentStage}`);
+
+    let result: {
+      summary: ScrapeTaskSummary;
+      hasMore: boolean;
+      nextState: any;
+    };
+
+    const subStateWithLog = { ...state.subState, logId };
+
+    try {
+      switch (currentStage) {
+        case "platform_popular":
+          result = (await this.runAllPlatformsDiscoveryChunk("popularity.desc", subStateWithLog)) as any;
+          break;
+        case "platform_latest":
+          result = (await this.runAllPlatformsDiscoveryChunk("primary_release_date.desc", subStateWithLog)) as any;
+          break;
+        case "global_trending":
+          result = (await this.runTrendingChunk(subStateWithLog)) as any;
+          break;
+        case "new_releases":
+          result = (await this.runNewReleasesChunk(subStateWithLog)) as any;
+          break;
+        case "genre_discovery":
+          result = (await this.runDiscoveryChunk(2, subStateWithLog)) as any;
+          break;
+        case "metadata_sync":
+          result = (await this.runSyncMetadataChunk(subStateWithLog)) as any;
+          break;
+        case "health_check":
+          result = (await this.runHealthCheckChunk(subStateWithLog)) as any;
+          break;
+        default:
+          return {
+            summary: { items_processed: 0, items_added: 0, items_failed: 0, errors: [] },
+            hasMore: false,
+            stage: "done",
+          };
+      }
+
+      if (!result.hasMore) {
+        // Move to next stage
+        stageIndex++;
+        if (stageIndex >= stages.length) {
+          if (logId) await this.updateLog(logId, "success", result.summary);
+          await this.updateAutomationState({ stage: stages[0], subState: {}, logId: null });
+          return { summary: result.summary, hasMore: false, stage: "completed_all" };
+        } else {
+          await this.updateAutomationState({ stage: stages[stageIndex], subState: {}, logId });
+        }
+      } else {
+        // Continue same stage
+        await this.updateAutomationState({ stage: currentStage, subState: result.nextState, logId });
+      }
+
+      return { summary: result.summary, hasMore: true, stage: currentStage };
+    } finally {
+      // Release lock
+      await supabase.from("settings").upsert({ key: "scraper_lock", value: { active: false, last_seen: new Date().toISOString() } });
+    }
+  }
+
+  private async getAutomationState() {
+    const { data } = await supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "scraper_automation_state")
+      .single();
+    return data?.value || { stage: "platform_popular", subState: {} };
+  }
+
+  private async updateAutomationState(state: any) {
+    await supabase
+      .from("settings")
+      .upsert({ key: "scraper_automation_state", value: state }, { onConflict: "key" });
+  }
+
+  /**
+   * Helper to run discovery for all platforms in sequence
+   */
+  private async runAllPlatformsDiscoveryChunk(
+    sortBy: string,
+    state: any = {}
+  ): Promise<{ summary: ScrapeTaskSummary; hasMore: boolean; nextState: any }> {
+    const platforms = ["netflix", "disney", "hbo", "amazon", "apple", "paramount"];
+    const currentPlatformIndex = state.platformIndex || 0;
+    const platform = platforms[currentPlatformIndex];
+
+    if (!platform) return { summary: { items_processed: 0, items_added: 0, items_failed: 0, errors: [] }, hasMore: false, nextState: {} };
+
+    // Create custom tasks for this platform and sort mode
+    const NETWORK_TV_IDS: Record<string, number[]> = {
+      netflix: [213],
+      disney: [2739, 3353],
+      hbo: [49, 3186, 2832],
+      amazon: [1024, 4353],
+      apple: [2552],
+      paramount: [4330, 2076],
+    };
+    const NETWORK_MOVIE_PROVIDERS: Record<string, number[]> = {
+      netflix: [8],
+      disney: [337],
+      hbo: [384],
+      amazon: [9],
+      apple: [350],
+      paramount: [531],
+    };
+
+    const tasks: Array<{ type: string; url: string }> = [];
+    for (const nid of NETWORK_TV_IDS[platform] || []) {
+      tasks.push({
+        type: "tv",
+        url: `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&with_networks=${nid}&sort_by=${sortBy}${sortBy.includes("release_date") ? "&first_air_date.lte=" + new Date().toISOString().split("T")[0] : ""}`,
+      });
+    }
+    for (const pid of NETWORK_MOVIE_PROVIDERS[platform] || []) {
+      tasks.push({
+        type: "movie",
+        url: `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&with_watch_providers=${pid}&watch_region=US&sort_by=${sortBy}${sortBy.includes("release_date") ? "&primary_release_date.lte=" + new Date().toISOString().split("T")[0] : ""}`,
+      });
+    }
+
+    const chunkResult = await this.runNetworkDiscoveryChunk(platform, 1, {
+      ...state.discoveryState,
+      tasks,
+      logId: state.logId,
+    });
+
+    if (!chunkResult.hasMore) {
+      const nextPlatformIndex = currentPlatformIndex + 1;
+      const hasMorePlatforms = nextPlatformIndex < platforms.length;
+      return {
+        summary: chunkResult.summary,
+        hasMore: hasMorePlatforms,
+        nextState: hasMorePlatforms ? { platformIndex: nextPlatformIndex, discoveryState: {} } : {},
+      };
+    }
+
+    return {
+      summary: chunkResult.summary,
+      hasMore: true,
+      nextState: { platformIndex: currentPlatformIndex, discoveryState: chunkResult.nextState },
+    };
+  }
+
+  /**
+   * Orchestrates a full automated scraping routine in stages.
+   * This is what Netlify Cron calls.
+   */
+  public async runFullRoutine(state: any = {}): Promise<any> {
+    const stages = ["new_releases", "trending", "netflix"];
+    const currentStageIndex = state.stageIndex || 0;
+    const stage = stages[currentStageIndex];
+
+    if (!stage) {
+      return { summary: { items_processed: 0, items_added: 0, items_failed: 0, errors: [] }, hasMore: false };
+    }
+
+    console.log(`[FullRoutine] Starting stage: ${stage}`);
+    let result: any;
+
+    if (stage === "new_releases") {
+      result = await this.runNewReleasesChunk(state.stageState || {});
+    } else if (stage === "trending") {
+      result = await this.runTrendingChunk(state.stageState || {});
+    } else if (stage === "netflix") {
+      result = await this.runNetflixDiscoveryChunk(3, state.stageState || {});
+    }
+
+    if (!result.hasMore) {
+      const nextStageIndex = currentStageIndex + 1;
+      const hasMoreStages = nextStageIndex < stages.length;
+      return {
+        summary: result.summary,
+        hasMore: hasMoreStages,
+        nextState: hasMoreStages ? { stageIndex: nextStageIndex, stageState: {} } : {},
+      };
+    }
+
+    return {
+      summary: result.summary,
+      hasMore: true,
+      nextState: { stageIndex: currentStageIndex, stageState: result.nextState },
+    };
   }
 }

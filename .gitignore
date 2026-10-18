@@ -1,66 +1,13 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-Thumbs.db
-
-# env files (Sangat Penting: Jangan pernah push rahasia ke GitHub)
-.env
-.env*.local
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.env
-
-# vercel
-.vercel
-
-# typescript
+node_modules/
+.next/
+apps/*/dist/
+apps/*/.turbo/
+coverage/
 *.tsbuildinfo
-next-env.d.ts
-
-# IDE / Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-.project
-.settings
-.classpath
-
-# Antigravity / AI Agent Specific
-.agent/
-.gemini/
-CLAUDE.md
-GUIDE_SKILLS_ANTIGRAVITY.txt
-/scratch/
-/docs/superpowers/plans/
-/docs/superpowers/specs/
-
-# Windows specifics
-$RECYCLE.BIN/
-Desktop.ini
+.env
+.env.*
+!.env.example
+apps/*/.env
+apps/*/.env.*
+!apps/*/.env.example
+apps/api/storage/

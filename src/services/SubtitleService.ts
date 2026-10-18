@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import AdmZip from 'adm-zip';
+import { subtitleRequest, toWebVtt } from '@/lib/subtitle-format';
 
 // Configuration
 
@@ -19,40 +20,20 @@ export interface SubtitleFetchResult {
 }
 
 export class SubtitleService {
+  private static pending = new Map<string, Promise<SubtitleFetchResult>>();
+  private static recent = new Map<string, { expires: number; result: SubtitleFetchResult }>();
   /**
    * Convert SRT content to VTT format
    */
   private static srtToVtt(srt: string): string {
-    let vtt = 'WEBVTT\n\n';
-    const normalized = srt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const blocks = normalized.split('\n\n').filter(block => block.trim());
-    
-    for (const block of blocks) {
-      const lines = block.split('\n');
-      let timestampIdx = -1;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('-->')) {
-          timestampIdx = i;
-          break;
-        }
-      }
-      if (timestampIdx === -1) continue;
-      
-      const timestamp = lines[timestampIdx].replace(/,/g, '.');
-      const text = lines.slice(timestampIdx + 1).join('\n');
-      
-      if (text.trim()) {
-        vtt += `${timestamp}\n${text}\n\n`;
-      }
-    }
-    return vtt;
+    return toWebVtt(srt);
   }
 
-  private static async fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 15000): Promise<Response> {
+  private static async fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 8000): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
+      const response = await fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal });
       clearTimeout(id);
       return response;
     } catch (error) {
@@ -61,11 +42,11 @@ export class SubtitleService {
     }
   }
 
-  private static async fetchFromOpenSubtitles(tmdbId: number | string, type: 'movie' | 'tv', season?: string, episode?: string, langCode: string = 'id'): Promise<string> {
+  private static async fetchFromOpenSubtitles(tmdbId: number | string, type: 'movie' | 'tv', season?: string, episode?: string, langCode: string = 'id', signal?: AbortSignal): Promise<string> {
     if (!OPENSUBTITLES_API_KEY) throw new Error('OpenSubtitles API key missing');
     
     const searchParams = new URLSearchParams({
-      tmdb_id: String(tmdbId),
+      [type === 'tv' ? 'parent_tmdb_id' : 'tmdb_id']: String(tmdbId),
       languages: langCode,
       order_by: 'download_count',
       order_direction: 'desc',
@@ -77,6 +58,7 @@ export class SubtitleService {
     }
 
     const searchRes = await this.fetchWithTimeout(`${OS_BASE_URL}/subtitles?${searchParams.toString()}`, {
+      signal,
       headers: {
         'Api-Key': OPENSUBTITLES_API_KEY,
         'Content-Type': 'application/json',
@@ -91,10 +73,12 @@ export class SubtitleService {
       throw new Error(`No ${langCode} subtitles found on OS`);
     }
 
-    const fileId = searchData.data[0].attributes?.files?.[0]?.file_id;
+    const match = searchData.data.find((item: { attributes?: { language?: string } }) => item.attributes?.language === langCode);
+    const fileId = match?.attributes?.files?.[0]?.file_id;
     if (!fileId) throw new Error('No subtitle file ID found');
 
     const downloadRes = await this.fetchWithTimeout(`${OS_BASE_URL}/download`, {
+      signal,
       method: 'POST',
       headers: {
         'Api-Key': OPENSUBTITLES_API_KEY,
@@ -109,14 +93,18 @@ export class SubtitleService {
     const downloadUrl = downloadData.link;
 
     if (!downloadUrl) throw new Error('No dl link received');
+    const source = new URL(downloadUrl);
+    if (source.protocol !== 'https:' || source.username || source.password || !['opensubtitles.com', 'opensubtitles.org'].some(host => source.hostname === host || source.hostname.endsWith(`.${host}`))) throw new Error('Unexpected OpenSubtitles download host');
 
-    const fileRes = await this.fetchWithTimeout(downloadUrl);
+    const fileRes = await this.fetchWithTimeout(downloadUrl, { redirect: 'error', signal });
     if (!fileRes.ok) throw new Error('Failed to fetch from OS dl URL');
 
-    return await fileRes.text();
+    const text = await fileRes.text();
+    this.srtToVtt(text); // Validate before deciding that this provider succeeded.
+    return text;
   }
 
-  private static async fetchFromSubdl(tmdbId: number | string, type: 'movie' | 'tv', season?: string, episode?: string, langCode: string = 'ID'): Promise<string> {
+  private static async fetchFromSubdl(tmdbId: number | string, type: 'movie' | 'tv', season?: string, episode?: string, langCode: string = 'ID', signal?: AbortSignal): Promise<string> {
     if (!SUBDL_API_KEY) throw new Error('Subdl API Key missing');
     
     let subdlUrl = `https://api.subdl.com/api/v1/subtitles?api_key=${SUBDL_API_KEY}&tmdb_id=${tmdbId}&languages=${langCode.toUpperCase()}&type=${type}`;
@@ -124,7 +112,7 @@ export class SubtitleService {
       subdlUrl += `&season_number=${season}&episode_number=${episode}`;
     }
 
-    const subdlRes = await this.fetchWithTimeout(subdlUrl);
+    const subdlRes = await this.fetchWithTimeout(subdlUrl, { signal });
     if (!subdlRes.ok) throw new Error(`Subdl Search Failed: ${subdlRes.status}`);
 
     const subdlData = await subdlRes.json();
@@ -132,16 +120,24 @@ export class SubtitleService {
       throw new Error(`No ${langCode} subtitles found on Subdl`);
     }
 
-    const downloadLink = `https://dl.subdl.com${subdlData.subtitles[0].url}`;
-    const zipRes = await this.fetchWithTimeout(downloadLink);
+    const selected = subdlData.subtitles.find((item: { language?: string; full_season?: boolean; episode?: number; episode_from?: number; episode_end?: number }) => item.language?.toUpperCase() === langCode.toUpperCase() && (type === 'movie' || !item.full_season && [item.episode, item.episode_from, item.episode_end].every(value => !value || Number(value) === Number(episode))));
+    const path = selected?.url;
+    if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('No matching episode download path from Subdl');
+    const download = new URL(path, 'https://dl.subdl.com');
+    if (download.origin !== 'https://dl.subdl.com' || !/^\/(?:sub|subtitle)\/[A-Za-z0-9_.-]+\.zip$/.test(download.pathname)) throw new Error('Invalid Subdl download path');
+    const zipRes = await this.fetchWithTimeout(download.toString(), { redirect: 'error', signal });
     if (!zipRes.ok) throw new Error('Failed to download ZIP from Subdl');
 
     const arrayBuffer = await zipRes.arrayBuffer();
+    if (arrayBuffer.byteLength > 8 * 1024 * 1024) throw new Error('Subtitle archive too large');
     const zip = new AdmZip(Buffer.from(arrayBuffer));
+    if (zip.getEntryCount() > 200) throw new Error('Too many subtitle archive entries');
     
     for (const entry of zip.getEntries()) {
       if (entry.entryName.toLowerCase().endsWith('.srt')) {
-        return zip.readAsText(entry);
+        if (entry.header.size > 2 * 1024 * 1024) continue;
+        const text = zip.readAsText(entry);
+        try { this.srtToVtt(text); return text; } catch { /* Try the next valid subtitle in the archive. */ }
       }
     }
 
@@ -149,18 +145,29 @@ export class SubtitleService {
   }
 
   public static async fetchAndUploadSubtitle(tmdbId: number | string, type: 'movie' | 'tv' = 'movie', season?: string, episode?: string): Promise<SubtitleFetchResult> {
-    // We will save language as part of the filename: movie/123_id.vtt or movie/123_en.vtt
-    // Actually, to avoid breaking existing frontend logic that expects /api/subtitles?tmdb_id=123 to return the correct sub,
-    // we will save it as {type}/{tmdbId}_en.vtt or {type}/{tmdbId}_id.vtt, and the API will find whichever exists.
-    const basePath = type === 'tv' && season && episode
-      ? `${type}/${tmdbId}/s${season}e${episode}`
-      : `${type}/${tmdbId}`;
+    let request: ReturnType<typeof subtitleRequest>;
+    try { request = subtitleRequest(tmdbId, type, season, episode); } catch (error) {
+      return { status: 'error', reason: error instanceof Error ? error.message : 'Invalid subtitle request' };
+    }
+    const cached = this.recent.get(request.basePath);
+    if (cached && cached.expires > Date.now()) return cached.result.status === 'success' ? { ...cached.result, status: 'skipped', reason: 'recent_result' } : cached.result;
+    const active = this.pending.get(request.basePath);
+    if (active) return active;
+    const promise = this.fetchSubtitle(request).then(result => {
+      this.recent.set(request.basePath, { result, expires: Date.now() + (result.status === 'error' ? 5 : 10) * 60 * 1000 });
+      if (this.recent.size > 256) this.recent.delete(this.recent.keys().next().value!);
+      return result;
+    }).finally(() => this.pending.delete(request.basePath));
+    this.pending.set(request.basePath, promise);
+    return promise;
+  }
 
-    // 0. Check if already exists in storage (ID or EN)
+  private static async fetchSubtitle({ id: tmdbId, type, season, episode, folder: folderPath, prefix: searchPrefix, basePath }: ReturnType<typeof subtitleRequest>): Promise<SubtitleFetchResult> {
+    let fallback: SubtitleFetchResult | undefined;
+    const signal = AbortSignal.timeout(25000);
+
+    // Only an explicitly Indonesian cache satisfies the preferred-language request.
     try {
-      const folderPath = type === 'tv' && season && episode ? `${type}/${tmdbId}` : `${type}`;
-      const searchPrefix = type === 'tv' && season && episode ? `s${season}e${episode}` : `${tmdbId}`;
-      
       const { data: listData } = await supabase.storage.from('subtitles').list(folderPath, { search: searchPrefix });
       
       if (listData && listData.length > 0) {
@@ -173,12 +180,14 @@ export class SubtitleService {
         
         if (file) {
           const { data } = supabase.storage.from('subtitles').getPublicUrl(`${folderPath}/${file.name}`);
-          return { 
+          const result: SubtitleFetchResult = {
             status: 'skipped', 
             reason: 'already_exists', 
             url: data.publicUrl,
-            language: file === idFile ? 'id' : (file === enFile ? 'en' : 'id')
+            language: file === idFile ? 'id' : (file === enFile ? 'en' : 'unknown')
           };
+          if (idFile) return result;
+          fallback = result;
         }
       }
     } catch {
@@ -190,19 +199,20 @@ export class SubtitleService {
 
     // 1. Try Indonesian (OS -> Subdl)
     try {
-      srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'id');
+      srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'id', signal);
     } catch {
       try {
-        srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'ID');
+        srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'ID', signal);
       } catch {
+        if (fallback) return fallback;
         // 2. Fallback to English (OS -> Subdl)
         try {
           console.log(`[Subtitles] ID failed for ${tmdbId}. Trying EN Fallback...`);
-          srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'en');
+          srtContent = await this.fetchFromOpenSubtitles(tmdbId, type, season, episode, 'en', signal);
           foundLang = 'en';
         } catch {
           try {
-            srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'EN');
+            srtContent = await this.fetchFromSubdl(tmdbId, type, season, episode, 'EN', signal);
             foundLang = 'en';
           } catch {
             return { status: 'error', reason: 'No subtitles found for ID or EN' };

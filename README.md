@@ -20,5 +20,8 @@ Untuk memahami cara kerja setiap folder dan file dalam proyek ini, silakan baca 
 4. Salin `.env.example` ke `.env.local` dan isi API Key Anda.
 5. Jalankan server pengembangan: `npm run dev`.
 
+### CinePro Core (opsional)
+NETIX dapat memakai sumber video dari instance CinePro Core milik Anda. Jalankan Core secara terpisah (misalnya pada port `3100` agar tidak bentrok dengan NETIX di `3000`), lalu atur `CINEPRO_CORE_URL=http://localhost:3100` di `.env.local` NETIX. Core memerlukan `TMDB_API_KEY` milik Anda. Jika Core tidak tersedia atau tidak menemukan sumber, server NETIX yang sudah ada tetap digunakan.
+
 ---
 *Dikembangkan oleh [Jhansen Wilson].*

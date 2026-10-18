@@ -2,22 +2,33 @@
   "name": "temp_init",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "npm run dev:stack",
+    "dev:stack": "concurrently -k -n api,web -c blue,green \"npm run dev --workspace=@netix/api\" \"npm run dev --workspace=@netix/web\"",
+    "dev:api": "npm run dev --workspace=@netix/api",
+    "dev:web": "npm run dev --workspace=@netix/web",
+    "build": "npm run build --workspace=@netix/api && npm run build --workspace=@netix/web",
+    "start": "npm run start --workspace=@netix/api",
+    "video:prepare": "node scripts/prepare-video.mjs",
+    "catalog:refresh": "node scripts/catalog-refresh.mjs",
+    "drive:batch": "node scripts/drive-batch.mjs"
   },
   "dependencies": {
+    "@netlify/functions": "^5.2.1",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.2",
     "@vercel/analytics": "^2.0.1",
     "adm-zip": "^0.5.17",
     "clsx": "^2.1.1",
+    "concurrently": "^9.2.1",
     "dotenv": "^17.4.2",
     "framer-motion": "^12.38.0",
+    "hls.js": "^1.7.3",
     "lucide-react": "^1.8.0",
-    "next": "16.2.4",
     "node-fetch": "^3.3.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -32,7 +43,6 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

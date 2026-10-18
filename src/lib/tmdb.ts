@@ -51,6 +51,44 @@ export interface TMDBMetadata {
   credits?: { cast: { id: number; name: string; character: string; profile_path: string | null }[] };
 }
 
+export interface TMDBWatchProvider {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string;
+  display_priority: number;
+}
+
+export interface TMDBWatchAvailability {
+  link: string;
+  flatrate?: TMDBWatchProvider[];
+  free?: TMDBWatchProvider[];
+  ads?: TMDBWatchProvider[];
+  rent?: TMDBWatchProvider[];
+  buy?: TMDBWatchProvider[];
+}
+
+/** Legal streaming availability by region; TMDB provides provider listings, not playable video URLs. */
+export const fetchTMDBWatchProviders = async (
+  id: number,
+  type: 'movie' | 'tv',
+  region = 'ID',
+): Promise<TMDBWatchAvailability | null> => {
+  if (!TMDB_API_KEY || !Number.isSafeInteger(id) || id <= 0 || !/^[A-Z]{2}$/.test(region)) return null;
+  try {
+    const response = await fetch(`${TMDB_BASE_URL}/${type}/${id}/watch/providers?api_key=${TMDB_API_KEY}`, { next: { revalidate: 21600 } });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const availability = data?.results?.[region];
+    if (!availability || typeof availability.link !== 'string') return null;
+    const link = new URL(availability.link);
+    if (link.protocol !== 'https:' || !['themoviedb.org', 'justwatch.com'].some(domain => link.hostname === domain || link.hostname.endsWith(`.${domain}`))) return null;
+    return availability as TMDBWatchAvailability;
+  } catch (error) {
+    console.error('Error fetching TMDB watch providers:', error);
+    return null;
+  }
+};
+
 export const fetchTMDBMetadata = async (id: number, type: 'movie' | 'tv'): Promise<TMDBMetadata | null> => {
   if (!TMDB_API_KEY) {
     console.error('TMDB_API_KEY is not set in environment variables.');
@@ -90,7 +128,8 @@ export const fetchTMDBTVSeasonDetails = async (tvId: number, seasonNumber: numbe
  */
 export const getTMDBImageUrl = (path: string, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original' = 'w500') => {
   if (!path) return '/placeholder-poster.png';
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  // Use our internal proxy API for better stability and caching
+  return `/api/tmdb/image/${size}${path}`;
 };
 
 // ============================================================

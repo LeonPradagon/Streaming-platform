@@ -1,0 +1,6 @@
+name = "netix-catalog-scheduler"
+main = "src/index.mjs"
+compatibility_date = "2026-10-18"
+
+[triggers]
+crons = ["0 */6 * * *", "30 */6 * * *"]

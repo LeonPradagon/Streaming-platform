@@ -6,19 +6,24 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: netix-scheduled-scraper
+  cancel-in-progress: false
+
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Scraper API Chunk
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          SCRAPER_SECRET: ${{ secrets.SCRAPER_SECRET }}
         run: |
-          # Ambil base URL, hilangkan https:// dan trailing slash jika ada
-          CLEAN_URL=$(echo "${{ secrets.SITE_URL }}" | sed -e 's|^https://||' -e 's|/$||')
-          
-          echo "Triggering scraper chunk at https://$CLEAN_URL/api/scraper/run"
-          
-          # Gunakan GET untuk memicu 1 chunk per pemanggilan.
-          # --max-time 240: Tunggu maksimal 4 menit (Vercel timeout 5m)
-          # --retry 2: Coba lagi jika gagal koneksi
-          curl -s -f --max-time 240 --retry 2 "https://$CLEAN_URL/api/scraper/run?secret=${{ secrets.SCRAPER_SECRET }}&task=scrape"
-
+          if [ -z "$SITE_URL" ] || [ -z "$SCRAPER_SECRET" ]; then
+            echo "SITE_URL and SCRAPER_SECRET repository secrets are required" >&2
+            exit 1
+          fi
+          BASE_URL="${SITE_URL%/}"
+          curl --silent --show-error --fail --max-time 240 --retry 2 \
+            --header "Authorization: Bearer $SCRAPER_SECRET" \
+            "$BASE_URL/api/cron/scraper"
